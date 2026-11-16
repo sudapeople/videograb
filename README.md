@@ -3,14 +3,17 @@
 # VideoGrab
 
 [![최신 릴리스](https://img.shields.io/github/v/release/sudapeople/videograb)](https://github.com/sudapeople/videograb/releases/latest)
+[![릴리스 날짜](https://img.shields.io/github/release-date/sudapeople/videograb)](https://github.com/sudapeople/videograb/releases/latest)
 [![다운로드 수](https://img.shields.io/github/downloads/sudapeople/videograb/total)](https://github.com/sudapeople/videograb/releases)
 [![라이선스](https://img.shields.io/github/license/sudapeople/videograb)](LICENSE)
 [![플랫폼](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Apple%20Silicon-blue?logo=apple)](#내려받기)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)](#빌드설치)
 [![Homebrew](https://img.shields.io/badge/Homebrew-yt--dlp%20%7C%20ffmpeg%20%7C%20deno-FBB040?logo=homebrew&logoColor=white)](#필요한-것)<br>
 [![GitHub 스타](https://img.shields.io/github/stars/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/stargazers)
+[![포크](https://img.shields.io/github/forks/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/forks)
 [![마지막 커밋](https://img.shields.io/github/last-commit/sudapeople/videograb)](https://github.com/sudapeople/videograb/commits/main)
-[![이슈](https://img.shields.io/github/issues/sudapeople/videograb)](https://github.com/sudapeople/videograb/issues)<br>
+[![이슈](https://img.shields.io/github/issues/sudapeople/videograb)](https://github.com/sudapeople/videograb/issues)
+[![주 언어](https://img.shields.io/github/languages/top/sudapeople/videograb)](src)<br>
 [![Discord](https://img.shields.io/discord/1321141059753086996?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gameboy.kr)
 [![YouTube](https://img.shields.io/badge/YouTube-%EC%88%98%EB%8B%A4%20SUDA-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCcm7Jc50537eMixvkVNU8-Q)
 [![치지직](https://img.shields.io/badge/CHZZK-%EC%88%98%EB%8B%A4%20SUDA-00FFA3)](https://chzzk.naver.com/bcf71dbdafcdddae524d82490db546c0)
