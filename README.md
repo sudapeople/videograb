@@ -9,7 +9,8 @@
 [![플랫폼](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Apple%20Silicon-blue?logo=apple)](#내려받기)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)](#빌드설치)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-0A84FF?logo=swift&logoColor=white)](src/VideoGrab.swift)
-[![Homebrew](https://img.shields.io/badge/Homebrew-yt--dlp%20%7C%20ffmpeg%20%7C%20deno-FBB040?logo=homebrew&logoColor=white)](#필요한-것)<br>
+[![Homebrew](https://img.shields.io/badge/Homebrew-yt--dlp%20%7C%20ffmpeg%20%7C%20deno-FBB040?logo=homebrew&logoColor=white)](#필요한-것)
+![Made in Korea](https://img.shields.io/badge/Made%20in-Korea-CD2E3A?labelColor=0047A0)<br>
 [![GitHub 스타](https://img.shields.io/github/stars/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/stargazers)
 [![포크](https://img.shields.io/github/forks/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/forks)
 [![방문자 수](https://hits.sh/github.com/sudapeople/videograb.svg?label=visitors&color=007ec6)](https://hits.sh/github.com/sudapeople/videograb/)
