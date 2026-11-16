@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="128" alt="VideoGrab 아이콘">
+
 # VideoGrab
 
 유튜브 링크를 복사한 뒤 창에서 `⌘V` 를 누르면 최고 화질로 바로 받는 맥 앱.
@@ -69,6 +71,7 @@ videograb/
 ├── docs/
 │   ├── 01-4K-Video-Downloader-분석.md   원본 앱 분석 기록
 │   ├── 02-설계와-검증.md                설계 결정과 시험 결과
+│   ├── icon.png                         README 용 아이콘
 │   └── screenshots/                     README 용 화면
 ├── src/
 │   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 270줄)
