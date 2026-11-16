@@ -4,6 +4,7 @@
 
 [![최신 릴리스](https://img.shields.io/github/v/release/sudapeople/videograb)](https://github.com/sudapeople/videograb/releases/latest)
 [![다운로드 수](https://img.shields.io/github/downloads/sudapeople/videograb/total)](https://github.com/sudapeople/videograb/releases)
+[![라이선스](https://img.shields.io/github/license/sudapeople/videograb)](LICENSE)
 
 한국어 | [English](#english)
 
