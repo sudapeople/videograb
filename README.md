@@ -8,6 +8,10 @@
 - 저장 위치 : 창 아래 "저장 위치 변경…" 으로 바꾼다. 기본값 `~/Downloads`
 - 컨테이너 : mp4 (코덱은 원본 그대로, 다시 인코딩하지 않는다)
 
+| 처음 화면 | 받는 중 |
+|---|---|
+| ![처음 화면](docs/screenshots/empty.png) | ![받는 중](docs/screenshots/downloading.png) |
+
 ## 사용법
 
 1. 브라우저에서 유튜브 주소를 복사한다 (주소창, 공유 버튼, 글 속 링크 모두 됨)
@@ -64,7 +68,8 @@ videograb/
 ├── README.md                 이 문서
 ├── docs/
 │   ├── 01-4K-Video-Downloader-분석.md   원본 앱 분석 기록
-│   └── 02-설계와-검증.md                설계 결정과 시험 결과
+│   ├── 02-설계와-검증.md                설계 결정과 시험 결과
+│   └── screenshots/                     README 용 화면
 ├── src/
 │   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 270줄)
 │   └── Info.plist

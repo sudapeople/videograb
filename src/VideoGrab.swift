@@ -171,6 +171,7 @@ struct ContentView: View {
                 } description: {
                     Text("유튜브 주소를 복사한 뒤 이 창에서 ⌘V 를 누르면\n최고 화질로 바로 받습니다.")
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(store.items) { item in
                     ItemRow(item: item, store: store)
