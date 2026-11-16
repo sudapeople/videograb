@@ -86,6 +86,7 @@ Xcode 프로젝트 없이 `swiftc` 한 번으로 빌드한다. macOS 14 이상, 
 ```
 videograb/
 ├── README.md                 이 문서
+├── LICENSE                   MIT 라이선스
 ├── docs/
 │   ├── 01-4K-Video-Downloader-분석.md   원본 앱 분석 기록
 │   ├── 02-설계와-검증.md                설계 결정과 시험 결과
@@ -104,6 +105,14 @@ videograb/
 
 `defaults read com.sudapeople.videograb outputDir` 로 저장 위치를 볼 수 있다.
 값을 지우면 기본값(`~/Downloads`)으로 돌아간다.
+
+## 라이선스
+
+[MIT](LICENSE). 자유롭게 쓰고 고치고 배포할 수 있다.
+
+앱이 불러 쓰는 yt-dlp(Unlicense), FFmpeg(LGPL/GPL), Deno(MIT)는 앱에 들어 있지 않고
+사용자가 Homebrew 로 따로 설치하므로 각자의 라이선스를 따른다.
+영상을 받을 때는 유튜브 이용약관과 저작권을 지켜야 한다.
 
 ---
 
@@ -188,3 +197,11 @@ It is ad-hoc signed (`codesign -s -`), meant for use on your own Mac.
 
 `defaults read com.sudapeople.videograb outputDir` shows the save location.
 Delete the value to go back to the default (`~/Downloads`).
+
+### License
+
+[MIT](LICENSE). Free to use, modify and distribute.
+
+yt-dlp (Unlicense), FFmpeg (LGPL/GPL) and Deno (MIT) are not bundled with the app.
+You install them separately with Homebrew, and each follows its own license.
+Respect YouTube's Terms of Service and copyright when downloading videos.
