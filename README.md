@@ -2,6 +2,8 @@
 
 # VideoGrab
 
+한국어 | [English](#english)
+
 유튜브 링크를 복사한 뒤 창에서 `⌘V` 를 누르면 최고 화질로 바로 받는 맥 앱.
 4K Video Downloader+ 의 "스마트 모드(붙여넣기 한 번에 정해진 설정으로 저장)" 만 떼어 낸 것이다.
 
@@ -86,3 +88,71 @@ videograb/
 
 `defaults read com.sudapeople.videograb outputDir` 로 저장 위치를 볼 수 있다.
 값을 지우면 기본값(`~/Downloads`)으로 돌아간다.
+
+---
+
+## English
+
+A macOS app that downloads a YouTube video in the best available quality the moment you press `⌘V` in its window.
+It is a minimal take on the "Smart Mode" of 4K Video Downloader+ (paste once, save with preset settings).
+
+- Quality : always the best video stream + best audio stream (`bv*+ba/b`). 4K, 8K, HDR and 60fps are kept as is
+- File name : the video title (`Title.mp4`)
+- Save location : change it with the "저장 위치 변경…" (Change location) button at the bottom. Default is `~/Downloads`
+- Container : mp4 (original codecs, no re-encoding)
+
+The app UI is in Korean. The documents in `docs/` are in Korean too.
+
+### Usage
+
+1. Copy a YouTube URL in your browser (address bar, share button, or a link inside any text)
+2. Press `⌘V` in the VideoGrab window (or click the paste button in the toolbar)
+3. When it finishes, click the magnifier button to reveal the file in Finder
+
+Other behavior
+
+- Several links on the clipboard are downloaded at the same time
+- A link with a playlist attached (`watch?v=...&list=...`) downloads only that one video
+- If the file already exists, it is not downloaded again and is shown as done right away
+- Cancelling keeps the partial file (`.part`). Press retry to resume
+- If the clipboard has no link, the app just beeps
+- Any site supported by yt-dlp works too (Twitch, X and more)
+
+### Requirements
+
+The app uses three tools installed with Homebrew. They are not bundled because YouTube changes often
+and yt-dlp needs frequent updates.
+
+```bash
+brew install yt-dlp ffmpeg deno
+```
+
+- `yt-dlp` : resolves and downloads the video
+- `ffmpeg` : merges video and audio
+- `deno` : JavaScript runtime yt-dlp uses for YouTube signature decoding
+
+If YouTube downloads suddenly fail, update yt-dlp first.
+
+```bash
+brew upgrade yt-dlp
+```
+
+### Build and install
+
+Built with a single `swiftc` call, no Xcode project. Requires macOS 14 or later on Apple Silicon.
+
+```bash
+./scripts/build.sh
+```
+
+```bash
+./scripts/build.sh install
+```
+
+With `install`, the app is copied to `/Applications/VideoGrab.app`.
+It is ad-hoc signed (`codesign -s -`), meant for use on your own Mac.
+
+### Settings
+
+`defaults read com.sudapeople.videograb outputDir` shows the save location.
+Delete the value to go back to the default (`~/Downloads`).
