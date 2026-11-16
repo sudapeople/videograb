@@ -14,6 +14,7 @@
 [![Discord](https://img.shields.io/discord/1321141059753086996?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gameboy.kr)
 [![YouTube](https://img.shields.io/badge/YouTube-%EC%88%98%EB%8B%A4%20SUDA-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCcm7Jc50537eMixvkVNU8-Q)
 [![치지직](https://img.shields.io/badge/CHZZK-%EC%88%98%EB%8B%A4%20SUDA-00FFA3)](https://chzzk.naver.com/bcf71dbdafcdddae524d82490db546c0)
+[![Instagram](https://img.shields.io/badge/Instagram-%40sudapeople-E4405F?logo=instagram&logoColor=white)](https://www.instagram.com/sudapeople/)
 
 한국어 | [English](#english)
 
