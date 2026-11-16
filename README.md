@@ -16,6 +16,22 @@
 |---|---|
 | ![처음 화면](docs/screenshots/empty.png) | ![받는 중](docs/screenshots/downloading.png) |
 
+## 내려받기
+
+[최신 릴리스](https://github.com/sudapeople/videograb/releases/latest) 에서 `VideoGrab-버전-arm64.zip` 을 받는다.
+macOS 14 이상, Apple Silicon (M1 이상).
+
+1. 압축을 풀고 `VideoGrab.app` 을 응용 프로그램 폴더로 옮긴다
+2. 받기 도구를 설치한다 (아래 "필요한 것" 참고)
+
+```bash
+brew install yt-dlp ffmpeg deno
+```
+
+3. 공증(notarization)을 받지 않은 앱이라 처음 열 때 macOS 가 막는다. 둘 중 하나로 연다
+   - 시스템 설정 > 개인정보 보호 및 보안 에서 "그래도 열기"
+   - 터미널에서 `xattr -dr com.apple.quarantine /Applications/VideoGrab.app`
+
 ## 사용법
 
 1. 브라우저에서 유튜브 주소를 복사한다 (주소창, 공유 버튼, 글 속 링크 모두 됨)
@@ -102,6 +118,22 @@ It is a minimal take on the "Smart Mode" of 4K Video Downloader+ (paste once, sa
 - Container : mp4 (original codecs, no re-encoding)
 
 The app UI is in Korean. The documents in `docs/` are in Korean too.
+
+### Download
+
+Get `VideoGrab-<version>-arm64.zip` from the [latest release](https://github.com/sudapeople/videograb/releases/latest).
+Requires macOS 14 or later on Apple Silicon (M1 or later).
+
+1. Unzip it and move `VideoGrab.app` to Applications
+2. Install the download tools (see Requirements below)
+
+```bash
+brew install yt-dlp ffmpeg deno
+```
+
+3. The app is not notarized, so macOS blocks it on first launch. Open it with either of these
+   - System Settings > Privacy & Security, then "Open Anyway"
+   - In Terminal: `xattr -dr com.apple.quarantine /Applications/VideoGrab.app`
 
 ### Usage
 
