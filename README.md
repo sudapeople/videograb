@@ -15,6 +15,7 @@
 [![YouTube](https://img.shields.io/badge/YouTube-%EC%88%98%EB%8B%A4%20SUDA-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCcm7Jc50537eMixvkVNU8-Q)
 [![치지직](https://img.shields.io/badge/CHZZK-%EC%88%98%EB%8B%A4%20SUDA-00FFA3)](https://chzzk.naver.com/bcf71dbdafcdddae524d82490db546c0)
 [![Instagram](https://img.shields.io/badge/Instagram-%40sudapeople-E4405F?logo=instagram&logoColor=white)](https://www.instagram.com/sudapeople/)
+[![X](https://img.shields.io/badge/X-%40sudapeople-000000?logo=x&logoColor=white)](https://x.com/sudapeople)
 
 한국어 | [English](#english)
 
