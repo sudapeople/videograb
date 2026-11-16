@@ -6,6 +6,7 @@
 [![다운로드 수](https://img.shields.io/github/downloads/sudapeople/videograb/total)](https://github.com/sudapeople/videograb/releases)
 [![라이선스](https://img.shields.io/github/license/sudapeople/videograb)](LICENSE)
 [![플랫폼](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Apple%20Silicon-blue?logo=apple)](#내려받기)
+[![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)](#빌드설치)
 
 한국어 | [English](#english)
 
@@ -73,7 +74,7 @@ brew upgrade yt-dlp
 
 ## 빌드·설치
 
-Xcode 프로젝트 없이 `swiftc` 한 번으로 빌드한다. macOS 14 이상, Apple Silicon.
+Xcode 프로젝트 없이 `swiftc` 한 번으로 빌드한다. macOS 14 이상, Apple Silicon, Swift 5.9 이상(Xcode 15 이상). Swift 6.4.2 로 시험했다.
 
 ```bash
 ./scripts/build.sh
@@ -198,7 +199,7 @@ brew upgrade yt-dlp
 
 ### Build and install
 
-Built with a single `swiftc` call, no Xcode project. Requires macOS 14 or later on Apple Silicon.
+Built with a single `swiftc` call, no Xcode project. Requires macOS 14 or later on Apple Silicon and Swift 5.9 or later (Xcode 15 or later). Tested with Swift 6.4.2.
 
 ```bash
 ./scripts/build.sh
