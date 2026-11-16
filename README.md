@@ -11,6 +11,7 @@
 [![Homebrew](https://img.shields.io/badge/Homebrew-yt--dlp%20%7C%20ffmpeg%20%7C%20deno-FBB040?logo=homebrew&logoColor=white)](#필요한-것)<br>
 [![GitHub 스타](https://img.shields.io/github/stars/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/stargazers)
 [![포크](https://img.shields.io/github/forks/sudapeople/videograb?style=flat)](https://github.com/sudapeople/videograb/forks)
+[![방문자 수](https://hits.sh/github.com/sudapeople/videograb.svg?label=visitors&color=007ec6)](https://hits.sh/github.com/sudapeople/videograb/)
 [![마지막 커밋](https://img.shields.io/github/last-commit/sudapeople/videograb)](https://github.com/sudapeople/videograb/commits/main)
 [![이슈](https://img.shields.io/github/issues/sudapeople/videograb)](https://github.com/sudapeople/videograb/issues)
 [![주 언어](https://img.shields.io/github/languages/top/sudapeople/videograb)](src)<br>
