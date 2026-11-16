@@ -81,6 +81,19 @@ Xcode 프로젝트 없이 `swiftc` 한 번으로 빌드한다. macOS 14 이상, 
 `install` 을 붙이면 `/Applications/VideoGrab.app` 으로 복사한다.
 서명은 애드혹(`codesign -s -`)이라 이 맥에서만 쓰는 용도다.
 
+```bash
+./scripts/build.sh zip
+```
+
+`zip` 을 붙이면 릴리스에 올릴 `build/VideoGrab-<버전>-arm64.zip` 을 만들고 SHA-256 을 출력한다.
+버전은 `src/Info.plist` 의 `CFBundleShortVersionString` 을 따르고,
+zip 안에는 `VideoGrab-<버전>/` 폴더에 `VideoGrab.app` 과 `LICENSE` 가 들어간다.
+새 버전을 낼 때는 이렇게 한다.
+
+1. `src/Info.plist` 의 `CFBundleShortVersionString` 과 `CFBundleVersion` 을 올린다
+2. `./scripts/build.sh zip`
+3. `gh release create v<버전> build/VideoGrab-<버전>-arm64.zip`
+
 ## 폴더 구조
 
 ```
@@ -96,7 +109,7 @@ videograb/
 │   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 270줄)
 │   └── Info.plist
 ├── scripts/
-│   ├── build.sh              빌드·설치
+│   ├── build.sh              빌드·설치·릴리스 zip
 │   └── make-icon.swift       아이콘 생성
 └── build/                    빌드 산출물 (지워도 다시 만들어짐)
 ```
@@ -192,6 +205,19 @@ Built with a single `swiftc` call, no Xcode project. Requires macOS 14 or later 
 
 With `install`, the app is copied to `/Applications/VideoGrab.app`.
 It is ad-hoc signed (`codesign -s -`), meant for use on your own Mac.
+
+```bash
+./scripts/build.sh zip
+```
+
+With `zip`, it creates `build/VideoGrab-<version>-arm64.zip` for a release and prints its SHA-256.
+The version comes from `CFBundleShortVersionString` in `src/Info.plist`,
+and the zip contains `VideoGrab.app` and `LICENSE` inside a `VideoGrab-<version>/` folder.
+To ship a new version:
+
+1. Bump `CFBundleShortVersionString` and `CFBundleVersion` in `src/Info.plist`
+2. `./scripts/build.sh zip`
+3. `gh release create v<version> build/VideoGrab-<version>-arm64.zip`
 
 ### Settings
 
