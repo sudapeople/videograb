@@ -13,6 +13,7 @@
 [![이슈](https://img.shields.io/github/issues/sudapeople/videograb)](https://github.com/sudapeople/videograb/issues)
 [![Discord](https://img.shields.io/discord/1321141059753086996?style=flat&logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gameboy.kr)
 [![YouTube](https://img.shields.io/badge/YouTube-%EC%88%98%EB%8B%A4%20SUDA-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/channel/UCcm7Jc50537eMixvkVNU8-Q)
+[![치지직](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.chzzk.naver.com%2Fservice%2Fv1%2Fchannels%2Fbcf71dbdafcdddae524d82490db546c0&query=%24.content.followerCount&label=CHZZK&suffix=%20followers&color=00FFA3)](https://chzzk.naver.com/bcf71dbdafcdddae524d82490db546c0)
 
 한국어 | [English](#english)
 
