@@ -126,13 +126,15 @@ videograb/
 │   ├── 01-4K-Video-Downloader-분석.md   원본 앱 분석 기록
 │   ├── 02-설계와-검증.md                설계 결정과 시험 결과
 │   ├── icon.png                         README 용 아이콘
+│   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
 │   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 270줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
-│   └── make-icon.swift       아이콘 생성
+│   ├── make-icon.swift       아이콘 생성
+│   └── make-social-preview.swift  대표 이미지 생성
 └── build/                    빌드 산출물 (지워도 다시 만들어짐)
 ```
 
