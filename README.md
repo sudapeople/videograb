@@ -26,11 +26,12 @@
 
 한국어 | [English](#english)
 
-유튜브 링크를 복사한 뒤 창에서 `⌘V` 를 누르면 최고 화질로 바로 받는 맥 앱.
+유튜브·인스타그램·X 영상 링크를 복사한 뒤 창에서 `⌘V` 를 누르면 최고 화질로 바로 받는 맥 앱.
 4K Video Downloader+ 의 "스마트 모드(붙여넣기 한 번에 정해진 설정으로 저장)" 만 떼어 낸 것이다.
+유튜브 채널을 등록해 두면 채널 영상을 한꺼번에 받거나, 새로 올라오는 영상을 자동으로 받는다.
 
 - 화질 : 항상 최고 화질 영상 + 최고 음질 오디오 (`bv*+ba/b`). 4K·8K·HDR·60fps 그대로
-- 파일명 : 영상 제목 그대로 (`제목.mp4`)
+- 파일명 : 영상 제목 그대로 (`제목.mp4`). 인스타그램·X 는 제목이 서로 겹쳐서 `제목 [영상ID].mp4`
 - 저장 위치 : 창 아래 "저장 위치 변경…" 으로 바꾼다. 기본값 `~/Downloads`
 - 컨테이너 : mp4 (코덱은 원본 그대로, 다시 인코딩하지 않는다)
 
@@ -56,7 +57,7 @@ brew install yt-dlp ffmpeg deno
 
 ## 사용법
 
-1. 브라우저에서 유튜브 주소를 복사한다 (주소창, 공유 버튼, 글 속 링크 모두 됨)
+1. 브라우저에서 유튜브 영상, 인스타그램 릴스·영상, X 영상 글의 주소를 복사한다 (주소창, 공유 버튼, 글 속 링크 모두 됨)
 2. VideoGrab 창에서 `⌘V` (또는 툴바의 붙여넣기 버튼)
 3. 끝나면 돋보기 버튼으로 Finder 에서 파일을 바로 연다
 
@@ -67,7 +68,22 @@ brew install yt-dlp ffmpeg deno
 - 이미 받은 파일이 있으면 다시 받지 않고 바로 "완료" 로 표시한다
 - 취소하면 받던 조각(`.part`)은 남는다. "다시 받기" 를 누르면 이어서 받는다
 - 링크가 없으면 경고음만 난다
-- 유튜브 외에도 yt-dlp 가 지원하는 사이트(치지직, 트위치, X 등)는 그대로 된다
+- 그 밖에 yt-dlp 가 지원하는 사이트(치지직, 트위치 등)도 그대로 된다
+- 인스타그램·X 에서 로그인해야 보이는 영상(비공개 계정, 성인 표시 글)은 받지 못한다
+
+### 유튜브 채널 등록
+
+유튜브 채널 주소(`youtube.com/@이름`, `youtube.com/channel/UC...`)를 복사해 창에서 `⌘V` 를 누르면
+그 채널이 창 위쪽 "채널" 목록에 등록된다. `/videos`, `/shorts` 가 붙은 주소도 같은 채널로 본다.
+
+- 전체 받기 : 채널 줄의 "전체 받기" 를 누르면 동영상·쇼츠·지난 라이브를 모두 차례로 받는다.
+  받은 영상은 기록해 두므로 중간에 취소하고 다시 눌러도 이어서 받는다
+- 새 영상 자동 받기 : 등록한 뒤에 올라온 영상을 자동으로 받는다. 등록할 때 이미 있던 영상은 받지 않는다.
+  앱을 켤 때 한 번, 켜 둔 동안 30분마다 확인하고, 툴바의 "새 영상 확인" 으로 바로 확인할 수도 있다.
+  앱을 꺼 둔 사이 올라온 영상은 다음에 켤 때 받는다 (탭마다 최신 30개까지)
+- 저장 폴더 : 채널마다 따로 정한다. 기본값은 `저장 위치/채널 이름` 이고, 채널 줄의 `…` 메뉴에서 바꾼다
+- 방송 중이거나 예정인 라이브는 끝난 뒤 다음 확인 때 받는다
+- 등록을 풀려면 `…` 메뉴의 "등록 해제". 받은 파일은 그대로 남는다
 
 ## 필요한 것
 
@@ -129,7 +145,7 @@ videograb/
 │   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
-│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 270줄)
+│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 590줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
@@ -143,23 +159,27 @@ videograb/
 `defaults read com.sudapeople.videograb outputDir` 로 저장 위치를 볼 수 있다.
 값을 지우면 기본값(`~/Downloads`)으로 돌아간다.
 
+등록한 채널은 `~/Library/Application Support/VideoGrab/channels.json` 에,
+채널별로 받은 영상 기록은 같은 폴더의 `채널ID.txt` 에 남는다.
+
 ## 라이선스
 
 [MIT](LICENSE). 자유롭게 쓰고 고치고 배포할 수 있다.
 
 앱이 불러 쓰는 yt-dlp(Unlicense), FFmpeg(LGPL/GPL), Deno(MIT)는 앱에 들어 있지 않고
 사용자가 Homebrew 로 따로 설치하므로 각자의 라이선스를 따른다.
-영상을 받을 때는 유튜브 이용약관과 저작권을 지켜야 한다.
+영상을 받을 때는 각 서비스의 이용약관과 저작권을 지켜야 한다.
 
 ---
 
 ## English
 
-A macOS app that downloads a YouTube video in the best available quality the moment you press `⌘V` in its window.
+A macOS app that downloads a YouTube, Instagram or X video in the best available quality the moment you press `⌘V` in its window.
 It is a minimal take on the "Smart Mode" of 4K Video Downloader+ (paste once, save with preset settings).
+Register a YouTube channel to download all of its videos, or to download new uploads automatically.
 
 - Quality : always the best video stream + best audio stream (`bv*+ba/b`). 4K, 8K, HDR and 60fps are kept as is
-- File name : the video title (`Title.mp4`)
+- File name : the video title (`Title.mp4`). Instagram and X titles collide, so those use `Title [video id].mp4`
 - Save location : change it with the "저장 위치 변경…" (Change location) button at the bottom. Default is `~/Downloads`
 - Container : mp4 (original codecs, no re-encoding)
 
@@ -183,7 +203,7 @@ brew install yt-dlp ffmpeg deno
 
 ### Usage
 
-1. Copy a YouTube URL in your browser (address bar, share button, or a link inside any text)
+1. Copy the URL of a YouTube video, an Instagram reel or video, or an X post with a video (address bar, share button, or a link inside any text)
 2. Press `⌘V` in the VideoGrab window (or click the paste button in the toolbar)
 3. When it finishes, click the magnifier button to reveal the file in Finder
 
@@ -194,7 +214,22 @@ Other behavior
 - If the file already exists, it is not downloaded again and is shown as done right away
 - Cancelling keeps the partial file (`.part`). Press retry to resume
 - If the clipboard has no link, the app just beeps
-- Any site supported by yt-dlp works too (Twitch, X and more)
+- Any other site supported by yt-dlp works too (Twitch and more)
+- Instagram and X videos that need a login (private accounts, age-restricted posts) cannot be downloaded
+
+#### YouTube channels
+
+Copy a YouTube channel URL (`youtube.com/@name`, `youtube.com/channel/UC...`) and press `⌘V` in the window.
+The channel is added to the "채널" (Channels) list at the top. URLs ending in `/videos` or `/shorts` count as the same channel.
+
+- Download all : the "전체 받기" button on the channel row downloads every video, short and past live stream in order.
+  Finished videos are recorded, so you can cancel and press it again to continue
+- New uploads : videos uploaded after you registered the channel are downloaded automatically. Videos that already existed are not.
+  The app checks once at launch and every 30 minutes while it is open. The "새 영상 확인" toolbar button checks right away.
+  Uploads made while the app was closed are picked up at the next launch (up to the latest 30 per tab)
+- Folder : each channel has its own. The default is `save location/channel name`. Change it from the `…` menu on the row
+- Live streams that are on air or scheduled are downloaded at a later check, after they end
+- To remove a channel, choose "등록 해제" in the `…` menu. Downloaded files stay
 
 ### Requirements
 
@@ -248,10 +283,13 @@ To ship a new version:
 `defaults read com.sudapeople.videograb outputDir` shows the save location.
 Delete the value to go back to the default (`~/Downloads`).
 
+Registered channels are stored in `~/Library/Application Support/VideoGrab/channels.json`,
+and the per-channel record of downloaded videos in `<channel id>.txt` in the same folder.
+
 ### License
 
 [MIT](LICENSE). Free to use, modify and distribute.
 
 yt-dlp (Unlicense), FFmpeg (LGPL/GPL) and Deno (MIT) are not bundled with the app.
 You install them separately with Homebrew, and each follows its own license.
-Respect YouTube's Terms of Service and copyright when downloading videos.
+Respect each service's Terms of Service and copyright when downloading videos.

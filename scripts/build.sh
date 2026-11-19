@@ -23,6 +23,7 @@ fi
 cp build/AppIcon.icns "$APP/Contents/Resources/"
 
 codesign --force --sign - "$APP"
+"$APP/Contents/MacOS/VideoGrab" --selftest
 echo "빌드 완료: $APP"
 
 if [[ "${1:-}" == "install" ]]; then
