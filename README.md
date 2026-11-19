@@ -75,6 +75,8 @@ brew install yt-dlp ffmpeg deno
 
 채널은 영상 받기와 따로, "채널 관리" 창에서 다룬다. 툴바의 채널 버튼이나 `⌘2` 로 연다.
 
+![채널 관리 창](docs/screenshots/channels.png)
+
 - 추가 : `+` 를 누르고 채널 주소(`youtube.com/@이름`, `youtube.com/channel/UC...`)와 저장 폴더를 정한다.
   메인 창에 채널 주소를 붙여넣어도 이 추가 창이 주소가 채워진 채로 뜬다
 - 삭제 : 채널을 고르고 휴지통 버튼(또는 `delete` 키). 받은 파일은 그대로 남는다
@@ -238,6 +240,8 @@ Other behavior
 #### YouTube channels
 
 Channels are managed in their own window, "채널 관리" (Channels). Open it with the channel button in the toolbar or `⌘2`.
+
+![Channels window](docs/screenshots/channels.png)
 
 - Add : press `+`, then enter the channel URL (`youtube.com/@name`, `youtube.com/channel/UC...`) and pick a folder.
   Pasting a channel URL in the main window opens the same sheet with the URL filled in
