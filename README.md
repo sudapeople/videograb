@@ -93,17 +93,35 @@ brew install yt-dlp ffmpeg deno
 
 - 저장 위치 : 주소를 붙여넣어 받는 영상을 저장하는 곳
 - 새 영상 확인 : 15분, 30분(기본값), 1시간, 3시간마다 또는 "자동으로 확인 안 함"
+- 상단바에서 계속 실행, 로그인할 때 자동으로 실행, 채널 영상을 받으면 알림 (모두 기본값 꺼짐. 아래 참고)
 - 받기 도구 : yt-dlp, ffmpeg, deno 가 설치되어 있는지 보여 준다
+
+### 상단바에서 계속 실행
+
+새 영상 확인은 앱이 켜져 있어야 돈다. 창을 닫아 두고도 계속 받으려면 설정에서 "상단바에서 계속 실행" 을 켠다.
+
+- 창을 모두 닫아도 앱이 끝나지 않고 상단바 아이콘으로 남는다. Dock 아이콘은 창이 열려 있을 때만 보인다
+- 상단바 메뉴 : 지금 상태(받는 중 개수, 마지막 확인 시각), VideoGrab 열기, 채널 관리, 지금 새 영상 확인,
+  최근 받은 영상(누르면 Finder 에서 보여 줌), 설정, 종료
+- 받는 중에는 아이콘이 채워진 모양으로 바뀐다
+- "로그인할 때 자동으로 실행" 을 같이 켜면 로그인할 때 창 없이 상단바로 시작한다.
+  macOS 의 로그인 항목(시스템 설정 > 일반 > 로그인 항목)에 등록되고, 끄면 지워진다
+- "채널 영상을 받으면 알림" 을 켜면 새 영상을 받았을 때, 전체 받기를 마쳤을 때, 받지 못했을 때 알림을 낸다
+- 확인에 실패하면(네트워크 끊김 등) 주기를 기다리지 않고 5분 뒤에 다시 확인한다
 
 ### 리소스
 
 새 영상 자동 받기는 앱이 켜져 있는 동안에만 돌고, 쓰지 않을 때는 아무것도 돌리지 않는다.
 
-- 뒤에 남는 프로세스가 없다. 로그인 항목이나 백그라운드 서비스를 설치하지 않고, 창을 모두 닫으면 앱이 끝난다
-- 확인할 채널이 없거나 확인을 꺼 두면 타이머도 없다. 있을 때도 확인 주기마다 한 번만 깨어난다
+- 따로 도는 백그라운드 서비스가 없다. "상단바에서 계속 실행" 을 켜도 떠 있는 것은 앱 하나뿐이고,
+  꺼 두면 창을 모두 닫을 때 앱이 끝난다
+- 확인할 채널이 없거나 확인을 꺼 두면 타이머도 없다. 있을 때도 확인 주기마다 한 번만 깨어난다.
+  상단바에서 기다리는 동안 CPU 는 쓰지 않고, 메모리는 100MB 안팎이다
 - 새 영상은 한 번에 하나씩 받는다
 - 앱을 끝내면 받고 있던 yt-dlp 와 ffmpeg 를 모두 멈춘다. 받던 조각(`.part`)은 남아서 다음에 이어 받는다
+- 앱이 강제 종료되거나 죽어서 yt-dlp 가 남았으면, 다음에 켤 때 찾아서 멈춘다
 - 채널 확인에는 시간 제한(2분)이 있어, 응답 없는 서버에 매달린 프로세스가 남지 않는다
+- 끝난 항목은 최근 200개만 목록에 남긴다
 
 ## 필요한 것
 
@@ -165,7 +183,7 @@ videograb/
 │   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
-│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 950줄)
+│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 1150줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
@@ -177,7 +195,8 @@ videograb/
 ## 설정 저장 위치
 
 설정 창의 값은 `defaults read com.sudapeople.videograb` 로 볼 수 있다
-(`outputDir` 저장 위치, `checkMinutes` 새 영상 확인 주기). 값을 지우면 기본값으로 돌아간다.
+(`outputDir` 저장 위치, `checkMinutes` 새 영상 확인 주기, `keepInMenuBar` 상단바에서 계속 실행,
+`notifyNew` 알림). 값을 지우면 기본값으로 돌아간다.
 
 등록한 채널은 `~/Library/Application Support/VideoGrab/channels.json` 에,
 채널별로 받은 영상 기록은 같은 폴더의 `채널ID.txt` 에 남는다.
@@ -259,17 +278,37 @@ Channels are managed in their own window, "채널 관리" (Channels). Open it wi
 
 - Save location : where pasted videos are saved
 - New upload check : every 15 minutes, 30 minutes (default), 1 hour, 3 hours, or never
+- Keep running in the menu bar, launch at login, notify on channel downloads (all off by default, see below)
 - Tools : shows whether yt-dlp, ffmpeg and deno are installed
+
+#### Keep running in the menu bar
+
+New uploads are checked only while the app is running. To keep downloading with the windows closed,
+turn on "상단바에서 계속 실행" (Keep running in the menu bar) in Settings.
+
+- Closing every window no longer quits the app. It stays as a menu bar icon, and the Dock icon shows only while a window is open
+- Menu : current status (active downloads, last check time), open VideoGrab, Channels, check now,
+  recent downloads (click to reveal in Finder), Settings, Quit
+- The icon is filled while something is downloading
+- With "로그인할 때 자동으로 실행" (Launch at login) also on, the app starts in the menu bar without a window at login.
+  It is registered as a macOS login item (System Settings > General > Login Items) and removed when you turn it off
+- "채널 영상을 받으면 알림" (Notify on channel downloads) posts a notification when a new upload is downloaded,
+  when "download all" finishes, and when a download fails
+- If a check fails (for example, no network), it is retried after 5 minutes instead of waiting for the full interval
 
 #### Resources
 
-Automatic downloads run only while the app is open, and nothing runs when the feature is not in use.
+Automatic downloads run only while the app is running, and nothing runs when the feature is not in use.
 
-- No process is left behind. The app installs no login item or background service, and quits when all windows are closed
-- With no channel to check, or with checking turned off, there is no timer at all. Otherwise it wakes once per interval
+- There is no separate background service. With the menu bar option on, the only thing running is the app itself.
+  With it off, the app quits when all windows are closed
+- With no channel to check, or with checking turned off, there is no timer at all. Otherwise it wakes once per interval.
+  While idle in the menu bar it uses no CPU and about 100 MB of memory
 - New uploads are downloaded one at a time
 - Quitting stops every running yt-dlp and ffmpeg. Partial files (`.part`) stay and are resumed next time
+- If the app was killed or crashed and left a yt-dlp behind, the next launch finds and stops it
 - A channel check has a time limit (2 minutes), so no process hangs on a silent server
+- Only the latest 200 finished items are kept in the list
 
 ### Requirements
 
@@ -321,7 +360,8 @@ To ship a new version:
 ### Settings
 
 `defaults read com.sudapeople.videograb` shows the values from the settings window
-(`outputDir` save location, `checkMinutes` check interval). Delete a value to go back to its default.
+(`outputDir` save location, `checkMinutes` check interval, `keepInMenuBar` menu bar mode, `notifyNew` notifications).
+Delete a value to go back to its default.
 
 Registered channels are stored in `~/Library/Application Support/VideoGrab/channels.json`,
 and the per-channel record of downloaded videos in `<channel id>.txt` in the same folder.

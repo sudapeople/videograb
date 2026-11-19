@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
+import UserNotifications
 
 // 저장 위치 기본값. 사용자가 바꾸면 UserDefaults "outputDir" 에 남는다.
 let defaultOutputDir = FileManager.default.homeDirectoryForCurrentUser
@@ -37,13 +39,43 @@ struct AddDraft: Identifiable {
 func tilde(_ path: String) -> String { (path as NSString).abbreviatingWithTildeInPath }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // 창을 모두 닫으면 끝낸다. 창 없이 뒤에서 도는 프로세스를 남기지 않는다.
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // 로그인 때 자동으로 켜졌으면 Dock 아이콘 없이 상단바로만 시작한다
+        if DownloadStore.launchedHidden { NSApp.setActivationPolicy(.accessory) }
+    }
 
-    // 받는 중에 끝내려 하면 한 번 묻는다. 취소하면 윈도우 메뉴(⌘1)나 Dock 으로 창을 다시 연다.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DownloadStore.sweepOrphans()
+        // 창이 열리고 닫힐 때마다 Dock 아이콘을 맞춘다. 닫힌 뒤의 상태를 봐야 해서 한 박자 늦춘다.
+        for name in [NSWindow.willCloseNotification, NSWindow.didBecomeKeyNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { AppDelegate.updateDockIcon() } }
+            }
+        }
+        if DownloadStore.launchedHidden {
+            DispatchQueue.main.async { NSApp.windows.filter(\.canBecomeMain).forEach { $0.close() } }
+        }
+    }
+
+    /// "상단바에서 계속 실행" 일 때 창이 하나도 없으면 Dock 아이콘을 숨기고, 창이 있으면 보인다.
+    @MainActor static func updateDockIcon() {
+        if NSApp.isHidden { return }
+        let hasWindow = NSApp.windows.contains { ($0.isVisible || $0.isMiniaturized) && $0.canBecomeMain }
+        let keep = UserDefaults.standard.bool(forKey: "keepInMenuBar")
+        let wanted: NSApplication.ActivationPolicy = hasWindow || !keep ? .regular : .accessory
+        if NSApp.activationPolicy() != wanted { NSApp.setActivationPolicy(wanted) }
+    }
+
+    // "상단바에서 계속 실행" 이 꺼져 있으면 창을 모두 닫을 때 끝낸다. 창 없이 뒤에서 도는 프로세스를 남기지 않는다.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !UserDefaults.standard.bool(forKey: "keepInMenuBar")
+    }
+
+    // 받는 중에 끝내려 하면 한 번 묻는다. 취소하면 윈도우 메뉴(⌘1)나 Dock, 상단바 아이콘으로 창을 다시 연다.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let active = DownloadStore.shared.items.filter(\.isActive).count
         if active == 0 { return .terminateNow }
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "받는 중인 항목이 \(active)개 있습니다. 끝낼까요?"
         alert.informativeText = "끝내면 받기를 멈춥니다. 받던 영상은 다음에 이어서 받습니다."
@@ -57,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct VideoGrabApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = DownloadStore.shared
+    @AppStorage("keepInMenuBar") private var keepInMenuBar = false
 
     init() {
         // ./scripts/build.sh 가 빌드 직후 돌리는 자체 점검
@@ -104,6 +137,13 @@ struct VideoGrabApp: App {
         Settings {
             SettingsView(store: store)
         }
+
+        // 설정의 "상단바에서 계속 실행" 을 켰을 때만 상단바에 아이콘을 둔다
+        MenuBarExtra(isInserted: $keepInMenuBar) {
+            MenuBarMenu(store: store)
+        } label: {
+            Image(systemName: store.items.contains(where: \.isActive) ? "arrow.down.circle.fill" : "arrow.down.circle")
+        }
     }
 }
 
@@ -125,6 +165,7 @@ final class DownloadItem: Identifiable {
     let folder: String?         // nil 이면 창 아래 저장 위치. 채널 영상은 채널 폴더
     let archive: String?        // 채널 영상만: 받은 영상 기록 파일
     let batchName: String?      // 채널 전체 받기일 때 채널 이름
+    var channelName: String?    // 새 영상 자동 받기일 때 채널 이름 (알림에 쓴다)
     var count = 0               // 받은 파일 수
     var title: String?
     var progress: Double = 0
@@ -290,9 +331,56 @@ final class DownloadStore {
             // ponytail: 50ms 폴링. 출력이 끝난 뒤라 대개 첫 확인에서 끝난다.
             while p.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
             item.finish(p.terminationStatus)
+            announce(item)
             startNextAuto()
         }
     }
+
+    /// 채널 영상 받기가 끝나면 알림을 낸다 (설정에서 켰을 때만). 창을 닫아 둔 동안에도 결과를 알 수 있게.
+    private func announce(_ item: DownloadItem) {
+        guard item.archive != nil, UserDefaults.standard.bool(forKey: "notifyNew") else { return }
+        let content = UNMutableNotificationContent()
+        switch item.status {
+        case .done where item.count > 0 && item.batchName != nil:
+            content.title = "채널 전체 받기를 마쳤습니다"
+            content.body = "\(item.batchName ?? "") · \(item.count)개 받음"
+        case .done where item.count > 0:
+            content.title = "새 영상을 받았습니다"
+            content.body = [item.channelName, item.title].compactMap { $0 }.joined(separator: " · ")
+        case .failed(let message):
+            content.title = "채널 영상을 받지 못했습니다"
+            content.body = [item.batchName ?? item.channelName, message].compactMap { $0 }.joined(separator: " · ")
+        default:
+            return
+        }
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: item.id.uuidString, content: content, trigger: nil))
+    }
+
+    /// 상단바 메뉴 맨 위에 보이는 한 줄
+    var statusLine: String {
+        let active = items.filter(\.isActive).count
+        if active > 0 { return "받는 중 \(active)개" }
+        if lastCheck == .distantPast { return "새 영상을 아직 확인하지 않음" }
+        return "마지막 확인 \(lastCheck.formatted(date: .omitted, time: .shortened))" + (lastCheckFailed ? " (실패, 곧 다시 확인)" : "")
+    }
+
+    /// 상단바 메뉴에 보일 최근 받은 영상 (최대 5개)
+    var recentDone: [DownloadItem] {
+        Array(items.filter { $0.status == .done && $0.filePath != nil }.prefix(5))
+    }
+
+    /// 로그인 항목으로 켜져서 창 없이 시작해야 하는지. "상단바에서 계속 실행" 이 켜져 있을 때만 해당한다.
+    static let launchedHidden: Bool = {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "keepInMenuBar") else { return false }
+        if defaults.bool(forKey: "startHidden") { return true }   // 직접 지정 (예: open ... --args -startHidden YES)
+        guard SMAppService.mainApp.status == .enabled else { return false }
+        // ponytail: 로그인 항목으로 켜졌는지 알려 주는 공식 방법이 없어, Dock 이 뜬 지 2분 안이면
+        // 로그인 직후로 본다. 틀려도 창이 안 뜰 뿐이고 상단바 아이콘으로 열 수 있다.
+        let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.launchDate
+        return dock.map { Date.now.timeIntervalSince($0) < 120 } ?? false
+    }()
 
     func cancel(_ item: DownloadItem) {
         item.status = .cancelled
@@ -328,6 +416,17 @@ final class DownloadStore {
         kill(p.processIdentifier, SIGKILL)
     }
 
+    /// 지난 실행이 비정상으로 끝나(강제 종료·충돌) 남은 yt-dlp 를 거둔다.
+    /// 이 앱이 띄운 것(출력 틀로 구분) 가운데 부모가 사라져 launchd 밑으로 간 것만 멈춘다.
+    static func sweepOrphans() {
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", #"ps -axwwo pid=,ppid=,command= | awk '$2 == 1 && /yt-dlp/ && (/TITLE %\(title\)s/ || /CH %\(channel_id\)s/) { print $1 }' | xargs kill -INT 2>/dev/null"#]
+        sh.standardOutput = FileHandle.nullDevice
+        sh.standardError = FileHandle.nullDevice
+        if (try? sh.run()) != nil { sh.waitUntilExit() }
+    }
+
     /// 앱을 끝낼 때: 예약과 돌고 있는 yt-dlp 를 모두 멈춘다. 뒤에 남는 프로세스가 없게 한다.
     func shutdown() {
         watchTask?.cancel()
@@ -346,7 +445,8 @@ final class DownloadStore {
     var alert: String?
     var addDraft: AddDraft?                 // nil 이 아니면 채널 추가 창을 띄운다
     private var checking = false
-    private var lastCheck = Date.distantPast
+    private(set) var lastCheck = Date.distantPast
+    private(set) var lastCheckFailed = false    // 실패했으면 주기를 기다리지 않고 5분 뒤 다시 확인한다
     private var watchTask: Task<Void, Never>?   // 다음 새 영상 확인 예약. 확인할 채널이 없으면 nil
     private var listing: [Process] = []         // 채널 목록을 가져오는 중인 yt-dlp
     private var attempted = Set<String>()   // 이번 실행에서 자동 받기를 건 영상. 실패한 영상을 30분마다 되풀이하지 않게
@@ -501,7 +601,8 @@ final class DownloadStore {
         guard minutes > 0, channels.contains(where: { $0.paused != true }) else { return }
         watchTask = Task {
             while !Task.isCancelled {
-                let wait = lastCheck.addingTimeInterval(Double(minutes * 60)).timeIntervalSinceNow
+                let interval = Double((lastCheckFailed ? min(minutes, 5) : minutes) * 60)
+                let wait = lastCheck.addingTimeInterval(interval).timeIntervalSinceNow
                 if wait > 0 {
                     try? await Task.sleep(for: .seconds(wait))
                 } else {
@@ -517,10 +618,15 @@ final class DownloadStore {
         checking = true
         defer { checking = false }
         lastCheck = .now
-        for channel in channels where channel.paused != true { await check(channel) }
+        var failed = false
+        for channel in channels where channel.paused != true {
+            if !(await check(channel)) { failed = true }
+        }
+        lastCheckFailed = failed
     }
 
-    func check(_ channel: Channel) async {
+    @discardableResult
+    func check(_ channel: Channel) async -> Bool {
         channelStatus[channel.id] = "새 영상 확인 중"
         // ponytail: 탭마다 최신 30개만 본다(요청 1번). 앱을 꺼 둔 사이 한 탭에 30개 넘게 올라오면
         // 그 앞 영상은 놓친다. 필요해지면 아는 영상이 나올 때까지 더 읽게 바꾼다.
@@ -528,15 +634,18 @@ final class DownloadStore {
         let time = Date.now.formatted(date: .omitted, time: .shortened)
         if lines.contains(where: { $0.hasPrefix("ERROR:") }) || !lines.contains(where: { $0.hasPrefix("CH UC") }) {
             channelStatus[channel.id] = "\(time) 확인 실패"
-            return
+            return false
         }
         let known = Set(channel.baseline).union(downloadedIDs(channel))
         let fresh = Self.videoIDs(lines).filter { !known.contains($0) && attempted.insert($0).inserted }
         for id in fresh {
-            start(DownloadItem(url: "https://www.youtube.com/watch?v=\(id)",
-                               folder: channel.folder, archive: channel.archive.path))
+            let item = DownloadItem(url: "https://www.youtube.com/watch?v=\(id)",
+                                    folder: channel.folder, archive: channel.archive.path)
+            item.channelName = channel.name
+            start(item)
         }
         channelStatus[channel.id] = "\(time) 확인" + (fresh.isEmpty ? "" : " · 새 영상 \(fresh.count)개")
+        return true
     }
 
     static func selfTest() {
@@ -630,13 +739,80 @@ func pickFolder(startingAt path: String) -> String? {
     return panel.runModal() == .OK ? panel.url?.path : nil
 }
 
+// MARK: 상단바 메뉴
+
+struct MenuBarMenu: View {
+    let store: DownloadStore
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Text(store.statusLine)
+        Divider()
+        Button("VideoGrab 열기") { show { openWindow(id: "main") } }
+        Button("채널 관리") { show { openWindow(id: "channels") } }
+        Button("지금 새 영상 확인") { Task { await store.checkAll() } }
+            .disabled(store.channels.isEmpty)
+        if !store.recentDone.isEmpty {
+            Divider()
+            Text("최근 받은 영상")
+            ForEach(store.recentDone) { item in
+                Button(String((item.title ?? "받은 영상").prefix(40))) {
+                    if let path = item.filePath {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    }
+                }
+            }
+        }
+        Divider()
+        Button("설정…") { show { openSettings() } }
+        Divider()
+        Button("VideoGrab 종료") { NSApp.terminate(nil) }
+    }
+
+    // 창 없이 상단바에만 있을 때는 Dock 아이콘이 없는 상태라, 먼저 보통 앱으로 돌린 뒤 창을 연다
+    private func show(_ open: () -> Void) {
+        NSApp.setActivationPolicy(.regular)
+        open()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 // MARK: 설정 창
 
 struct SettingsView: View {
     let store: DownloadStore
     @AppStorage("outputDir") private var outputDir = defaultOutputDir
     @AppStorage("checkMinutes") private var checkMinutes = 30
+    @AppStorage("keepInMenuBar") private var keepInMenuBar = false
+    @AppStorage("notifyNew") private var notifyNew = false
+    @State private var loginItem = SMAppService.mainApp.status == .enabled
+    @State private var note: String?    // 백그라운드 절에 보일 안내·오류
     @Environment(\.openWindow) private var openWindow
+
+    private func setLoginItem(_ on: Bool) {
+        guard Bundle.main.bundlePath.hasPrefix("/Applications/") else {
+            note = "응용 프로그램 폴더에 설치한 앱에서만 로그인 자동 실행을 켤 수 있습니다."
+            return
+        }
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            note = nil
+        } catch {
+            note = "로그인 자동 실행을 바꾸지 못했습니다. \(error.localizedDescription)"
+        }
+        loginItem = SMAppService.mainApp.status == .enabled
+    }
+
+    private func requestNotifications() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            Task { @MainActor in
+                if granted { return }
+                notifyNew = false
+                note = "알림이 막혀 있습니다. 시스템 설정 > 알림에서 VideoGrab 을 허용한 뒤 다시 켜 주세요."
+            }
+        }
+    }
 
     var body: some View {
         Form {
@@ -670,6 +846,17 @@ struct SettingsView: View {
                 Text("앱이 켜져 있는 동안에만 확인합니다. 켤 때 한 번 확인하고, 그 뒤로 이 주기마다 확인합니다. 새 영상은 한 번에 하나씩 받습니다.")
             }
             .onChange(of: checkMinutes) { store.scheduleWatch() }
+            Section {
+                Toggle("상단바에서 계속 실행", isOn: $keepInMenuBar)
+                Toggle("로그인할 때 자동으로 실행", isOn: Binding(get: { loginItem }, set: setLoginItem))
+                Toggle("채널 영상을 받으면 알림", isOn: $notifyNew)
+            } header: {
+                Text("백그라운드")
+            } footer: {
+                Text(note ?? "상단바에서 계속 실행을 켜면 창을 모두 닫아도 상단바 아이콘으로 남아 새 영상을 확인합니다. Dock 아이콘은 창이 열려 있을 때만 보입니다. 끄면 창을 닫을 때 앱이 끝납니다. 둘 다 켜면 로그인할 때 창 없이 상단바로 시작합니다.")
+            }
+            .onChange(of: keepInMenuBar) { AppDelegate.updateDockIcon() }
+            .onChange(of: notifyNew) { _, on in if on { requestNotifications() } }
             Section {
                 ForEach(["yt-dlp", "ffmpeg", "deno"], id: \.self) { tool in
                     LabeledContent(tool) {
