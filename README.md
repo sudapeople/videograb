@@ -71,19 +71,37 @@ brew install yt-dlp ffmpeg deno
 - 그 밖에 yt-dlp 가 지원하는 사이트(치지직, 트위치 등)도 그대로 된다
 - 인스타그램·X 에서 로그인해야 보이는 영상(비공개 계정, 성인 표시 글)은 받지 못한다
 
-### 유튜브 채널 등록
+### 유튜브 채널 관리
 
-유튜브 채널 주소(`youtube.com/@이름`, `youtube.com/channel/UC...`)를 복사해 창에서 `⌘V` 를 누르면
-그 채널이 창 위쪽 "채널" 목록에 등록된다. `/videos`, `/shorts` 가 붙은 주소도 같은 채널로 본다.
+채널은 영상 받기와 따로, "채널 관리" 창에서 다룬다. 툴바의 채널 버튼이나 `⌘2` 로 연다.
 
-- 전체 받기 : 채널 줄의 "전체 받기" 를 누르면 동영상·쇼츠·지난 라이브를 모두 차례로 받는다.
-  받은 영상은 기록해 두므로 중간에 취소하고 다시 눌러도 이어서 받는다
-- 새 영상 자동 받기 : 등록한 뒤에 올라온 영상을 자동으로 받는다. 등록할 때 이미 있던 영상은 받지 않는다.
-  앱을 켤 때 한 번, 켜 둔 동안 30분마다 확인하고, 툴바의 "새 영상 확인" 으로 바로 확인할 수도 있다.
+- 추가 : `+` 를 누르고 채널 주소(`youtube.com/@이름`, `youtube.com/channel/UC...`)와 저장 폴더를 정한다.
+  메인 창에 채널 주소를 붙여넣어도 이 추가 창이 주소가 채워진 채로 뜬다
+- 삭제 : 채널을 고르고 휴지통 버튼(또는 `delete` 키). 받은 파일은 그대로 남는다
+- 저장 폴더 : 채널마다 따로 정한다. 기본값은 `저장 위치/채널 이름` 이고 언제든 바꿀 수 있다
+- 새 영상 자동 받기 : 채널마다 켜고 끈다. 등록한 뒤에 올라온 영상만 받고, 등록할 때 이미 있던 영상은 받지 않는다.
   앱을 꺼 둔 사이 올라온 영상은 다음에 켤 때 받는다 (탭마다 최신 30개까지)
-- 저장 폴더 : 채널마다 따로 정한다. 기본값은 `저장 위치/채널 이름` 이고, 채널 줄의 `…` 메뉴에서 바꾼다
+- 채널 영상 전체 받기 : 동영상·쇼츠·지난 라이브를 모두 차례로 받는다.
+  받은 영상은 기록해 두므로 중간에 취소하고 다시 눌러도 이어서 받는다
 - 방송 중이거나 예정인 라이브는 끝난 뒤 다음 확인 때 받는다
-- 등록을 풀려면 `…` 메뉴의 "등록 해제". 받은 파일은 그대로 남는다
+
+### 설정
+
+앱 메뉴의 "설정…" (`⌘,`) 또는 툴바의 톱니바퀴.
+
+- 저장 위치 : 주소를 붙여넣어 받는 영상을 저장하는 곳
+- 새 영상 확인 : 15분, 30분(기본값), 1시간, 3시간마다 또는 "자동으로 확인 안 함"
+- 받기 도구 : yt-dlp, ffmpeg, deno 가 설치되어 있는지 보여 준다
+
+### 리소스
+
+새 영상 자동 받기는 앱이 켜져 있는 동안에만 돌고, 쓰지 않을 때는 아무것도 돌리지 않는다.
+
+- 뒤에 남는 프로세스가 없다. 로그인 항목이나 백그라운드 서비스를 설치하지 않고, 창을 모두 닫으면 앱이 끝난다
+- 확인할 채널이 없거나 확인을 꺼 두면 타이머도 없다. 있을 때도 확인 주기마다 한 번만 깨어난다
+- 새 영상은 한 번에 하나씩 받는다
+- 앱을 끝내면 받고 있던 yt-dlp 와 ffmpeg 를 모두 멈춘다. 받던 조각(`.part`)은 남아서 다음에 이어 받는다
+- 채널 확인에는 시간 제한(2분)이 있어, 응답 없는 서버에 매달린 프로세스가 남지 않는다
 
 ## 필요한 것
 
@@ -145,7 +163,7 @@ videograb/
 │   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
-│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 590줄)
+│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 950줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
@@ -156,8 +174,8 @@ videograb/
 
 ## 설정 저장 위치
 
-`defaults read com.sudapeople.videograb outputDir` 로 저장 위치를 볼 수 있다.
-값을 지우면 기본값(`~/Downloads`)으로 돌아간다.
+설정 창의 값은 `defaults read com.sudapeople.videograb` 로 볼 수 있다
+(`outputDir` 저장 위치, `checkMinutes` 새 영상 확인 주기). 값을 지우면 기본값으로 돌아간다.
 
 등록한 채널은 `~/Library/Application Support/VideoGrab/channels.json` 에,
 채널별로 받은 영상 기록은 같은 폴더의 `채널ID.txt` 에 남는다.
@@ -219,17 +237,35 @@ Other behavior
 
 #### YouTube channels
 
-Copy a YouTube channel URL (`youtube.com/@name`, `youtube.com/channel/UC...`) and press `⌘V` in the window.
-The channel is added to the "채널" (Channels) list at the top. URLs ending in `/videos` or `/shorts` count as the same channel.
+Channels are managed in their own window, "채널 관리" (Channels). Open it with the channel button in the toolbar or `⌘2`.
 
-- Download all : the "전체 받기" button on the channel row downloads every video, short and past live stream in order.
-  Finished videos are recorded, so you can cancel and press it again to continue
-- New uploads : videos uploaded after you registered the channel are downloaded automatically. Videos that already existed are not.
-  The app checks once at launch and every 30 minutes while it is open. The "새 영상 확인" toolbar button checks right away.
+- Add : press `+`, then enter the channel URL (`youtube.com/@name`, `youtube.com/channel/UC...`) and pick a folder.
+  Pasting a channel URL in the main window opens the same sheet with the URL filled in
+- Remove : select a channel and press the trash button (or the `delete` key). Downloaded files stay
+- Folder : each channel has its own. The default is `save location/channel name`, and you can change it at any time
+- New uploads : a per-channel switch. Only videos uploaded after you added the channel are downloaded.
   Uploads made while the app was closed are picked up at the next launch (up to the latest 30 per tab)
-- Folder : each channel has its own. The default is `save location/channel name`. Change it from the `…` menu on the row
+- Download all : downloads every video, short and past live stream in order.
+  Finished videos are recorded, so you can cancel and start again to continue
 - Live streams that are on air or scheduled are downloaded at a later check, after they end
-- To remove a channel, choose "등록 해제" in the `…` menu. Downloaded files stay
+
+#### Settings
+
+"설정…" in the app menu (`⌘,`) or the gear button in the toolbar.
+
+- Save location : where pasted videos are saved
+- New upload check : every 15 minutes, 30 minutes (default), 1 hour, 3 hours, or never
+- Tools : shows whether yt-dlp, ffmpeg and deno are installed
+
+#### Resources
+
+Automatic downloads run only while the app is open, and nothing runs when the feature is not in use.
+
+- No process is left behind. The app installs no login item or background service, and quits when all windows are closed
+- With no channel to check, or with checking turned off, there is no timer at all. Otherwise it wakes once per interval
+- New uploads are downloaded one at a time
+- Quitting stops every running yt-dlp and ffmpeg. Partial files (`.part`) stay and are resumed next time
+- A channel check has a time limit (2 minutes), so no process hangs on a silent server
 
 ### Requirements
 
@@ -280,8 +316,8 @@ To ship a new version:
 
 ### Settings
 
-`defaults read com.sudapeople.videograb outputDir` shows the save location.
-Delete the value to go back to the default (`~/Downloads`).
+`defaults read com.sudapeople.videograb` shows the values from the settings window
+(`outputDir` save location, `checkMinutes` check interval). Delete a value to go back to its default.
 
 Registered channels are stored in `~/Library/Application Support/VideoGrab/channels.json`,
 and the per-channel record of downloaded videos in `<channel id>.txt` in the same folder.

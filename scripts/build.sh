@@ -13,6 +13,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -parse-as-library -target arm64-apple-macos14.0 \
     -o "$APP/Contents/MacOS/VideoGrab" src/VideoGrab.swift
 cp src/Info.plist "$APP/Contents/"
+# 빈 ko.lproj: 이 폴더가 있어야 macOS 기본 메뉴(파일, 윈도우, 설정… 등)가 한국어로 나온다
+mkdir -p "$APP/Contents/Resources/ko.lproj"
 
 # 아이콘: build/AppIcon.icns 가 없을 때만 만든다
 if [[ ! -f build/AppIcon.icns ]]; then

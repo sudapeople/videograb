@@ -22,18 +22,46 @@ struct Channel: Codable, Identifiable {
     var folder: String      // 이 채널 영상을 저장하는 곳
     let baseline: [String]
     let addedAt: Date
+    var paused: Bool?       // true 면 새 영상 자동 받기를 꺼 둔 채널
 
     // yt-dlp 가 받은 영상 ID 를 적어 두는 파일. 전체 받기와 자동 받기가 같이 쓴다.
     var archive: URL { dataDir.appendingPathComponent("\(id).txt") }
 }
 
+// 채널 추가 창에 미리 채워 둘 주소
+struct AddDraft: Identifiable {
+    let id = UUID()
+    let url: String
+}
+
+func tilde(_ path: String) -> String { (path as NSString).abbreviatingWithTildeInPath }
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    // 창을 모두 닫으면 끝낸다. 창 없이 뒤에서 도는 프로세스를 남기지 않는다.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    // 받는 중에 끝내려 하면 한 번 묻는다. 취소하면 윈도우 메뉴(⌘1)나 Dock 으로 창을 다시 연다.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let active = DownloadStore.shared.items.filter(\.isActive).count
+        if active == 0 { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "받는 중인 항목이 \(active)개 있습니다. 끝낼까요?"
+        alert.informativeText = "끝내면 받기를 멈춥니다. 받던 영상은 다음에 이어서 받습니다."
+        alert.addButton(withTitle: "끝내기")
+        alert.addButton(withTitle: "취소")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+}
+
 @main
 struct VideoGrabApp: App {
-    @State private var store = DownloadStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var store = DownloadStore.shared
 
     init() {
         // ./scripts/build.sh 가 빌드 직후 돌리는 자체 점검
         if CommandLine.arguments.contains("--selftest") { DownloadStore.selfTest(); exit(0) }
+        NSWindow.allowsAutomaticWindowTabbing = false   // 창이 둘뿐이라 탭 메뉴는 뺀다
     }
 
     var body: some Scene {
@@ -41,12 +69,40 @@ struct VideoGrabApp: App {
             ContentView(store: store)
         }
         .defaultSize(width: 680, height: 440)
+        .keyboardShortcut("1")
         .commands {
-            // 텍스트 입력칸이 없는 앱이라 붙여넣기 메뉴를 통째로 링크 붙여넣기로 바꾼다.
+            // ⌘V: 글자 입력칸에 커서가 있으면 평소처럼 붙여넣고, 아니면 클립보드의 링크를 받는다.
             CommandGroup(replacing: .pasteboard) {
-                Button("링크 붙여넣기") { store.pasteFromClipboard() }
-                    .keyboardShortcut("v")
+                Button("오려두기") { NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("x")
+                Button("복사하기") { NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("c")
+                Button("붙여넣기") {
+                    if let text = NSApp.keyWindow?.firstResponder as? NSText {
+                        text.paste(nil)
+                    } else {
+                        store.pasteFromClipboard()
+                    }
+                }
+                .keyboardShortcut("v")
+                Button("전체 선택") { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("a")
             }
+            CommandGroup(replacing: .help) {
+                Button("VideoGrab 도움말") {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/sudapeople/videograb#readme")!)
+                }
+            }
+        }
+
+        Window("채널 관리", id: "channels") {
+            ChannelManager(store: store)
+        }
+        .defaultSize(width: 760, height: 480)
+        .keyboardShortcut("2")
+
+        Settings {
+            SettingsView(store: store)
         }
     }
 }
@@ -56,9 +112,13 @@ struct VideoGrabApp: App {
 @MainActor @Observable
 final class DownloadItem: Identifiable {
     enum Status: Equatable {
-        case running, done, cancelled
+        case waiting, running, done, cancelled
         case failed(String)
     }
+
+    var isActive: Bool { status == .running || status == .waiting }
+    // 채널의 새 영상을 자동으로 받는 항목. 한 번에 하나씩만 받는다
+    var isAuto: Bool { archive != nil && batchName == nil }
 
     let id = UUID()
     let url: String
@@ -103,6 +163,7 @@ final class DownloadItem: Identifiable {
 
 @MainActor @Observable
 final class DownloadStore {
+    static let shared = DownloadStore()
     var items: [DownloadItem] = []
 
     func pasteFromClipboard() {
@@ -111,16 +172,34 @@ final class DownloadStore {
         if urls.isEmpty { NSSound.beep(); return }
         for url in urls {
             if let channel = Self.channelURL(url) {
-                register(channel)
-            } else if !items.contains(where: { $0.url == url && $0.status == .running }) {
+                addDraft = AddDraft(url: channel)   // 채널은 채널 관리 창에서 폴더를 정해 등록한다
+            } else if !items.contains(where: { $0.url == url && $0.isActive }) {
                 start(DownloadItem(url: url))
             }
         }
     }
 
     func start(_ item: DownloadItem) {
+        // 앱을 오래 켜 두면 끝난 항목이 쌓인다. 끝난 것은 최근 200개만 남긴다.
+        var finished = 0
+        items.removeAll { item in
+            if item.isActive { return false }
+            finished += 1
+            return finished > 200
+        }
         items.insert(item, at: 0)
-        run(item)
+        if item.isAuto {
+            item.status = .waiting
+            startNextAuto()
+        } else {
+            run(item)
+        }
+    }
+
+    /// 자동 받기는 한 번에 하나씩. 받는 중인 것이 없으면 가장 오래 기다린 항목을 시작한다.
+    private func startNextAuto() {
+        if items.contains(where: { $0.isAuto && $0.status == .running }) { return }
+        if let next = items.last(where: { $0.isAuto && $0.status == .waiting }) { run(next) }
     }
 
     static func extractURLs(_ text: String) -> [String] {
@@ -147,7 +226,7 @@ final class DownloadStore {
         guard let path = findTool("yt-dlp") else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
+        p.arguments = ["--socket-timeout", "20"] + args   // 응답 없는 서버에 매달려 있지 않게
         // 앱은 셸 PATH 를 물려받지 않는다. ffmpeg·deno 를 yt-dlp 가 찾을 수 있게 넣어 준다.
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
@@ -211,16 +290,52 @@ final class DownloadStore {
             // ponytail: 50ms 폴링. 출력이 끝난 뒤라 대개 첫 확인에서 끝난다.
             while p.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
             item.finish(p.terminationStatus)
+            startNextAuto()
         }
     }
 
     func cancel(_ item: DownloadItem) {
         item.status = .cancelled
-        item.process?.terminate()
+        if let p = item.process { Self.stop(p) }
+        startNextAuto()
     }
 
     func clearFinished() {
-        items.removeAll { $0.status != .running }
+        items.removeAll { !$0.isActive }
+    }
+
+    // MARK: 프로세스 정리
+
+    /// yt-dlp 를 멈춘다. SIGINT 를 받으면 yt-dlp 가 자기가 띄운 ffmpeg 까지 정리하고 끝난다.
+    /// 3초 안에 안 끝나면 강제로 끝낸다.
+    static func stop(_ p: Process) {
+        guard p.isRunning else { return }
+        p.interrupt()
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            forceKill(p)
+        }
+    }
+
+    /// 자식 프로세스(ffmpeg)부터 강제로 끝낸다.
+    static func forceKill(_ p: Process) {
+        guard p.isRunning else { return }
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-KILL", "-P", "\(p.processIdentifier)"]
+        try? pkill.run()
+        pkill.waitUntilExit()
+        kill(p.processIdentifier, SIGKILL)
+    }
+
+    /// 앱을 끝낼 때: 예약과 돌고 있는 yt-dlp 를 모두 멈춘다. 뒤에 남는 프로세스가 없게 한다.
+    func shutdown() {
+        watchTask?.cancel()
+        let running = items.compactMap(\.process) + listing
+        running.forEach { $0.interrupt() }
+        let deadline = Date.now.addingTimeInterval(3)
+        while running.contains(where: \.isRunning) && Date.now < deadline { usleep(50_000) }
+        running.forEach(Self.forceKill)
     }
 
     // MARK: 채널
@@ -229,7 +344,11 @@ final class DownloadStore {
     var registering: [String] = []          // 등록 중인 채널 주소
     var channelStatus: [String: String] = [:]
     var alert: String?
+    var addDraft: AddDraft?                 // nil 이 아니면 채널 추가 창을 띄운다
     private var checking = false
+    private var lastCheck = Date.distantPast
+    private var watchTask: Task<Void, Never>?   // 다음 새 영상 확인 예약. 확인할 채널이 없으면 nil
+    private var listing: [Process] = []         // 채널 목록을 가져오는 중인 yt-dlp
     private var attempted = Set<String>()   // 이번 실행에서 자동 받기를 건 영상. 실패한 영상을 30분마다 되풀이하지 않게
 
     static var channelsFile: URL { dataDir.appendingPathComponent("channels.json") }
@@ -278,12 +397,20 @@ final class DownloadStore {
     }
 
     /// 채널의 영상 목록을 가져온다. latest 가 있으면 탭(동영상·쇼츠·라이브)마다 최신 그만큼만.
-    static func listChannel(_ url: String, latest: Int? = nil) async -> [String] {
+    func listChannel(_ url: String, latest: Int? = nil) async -> [String] {
         var args = ["--flat-playlist",
                     "--print", "playlist:CH %(channel_id)s %(channel)s",
                     "--print", "%(id)s %(live_status)s"]
         if let latest { args += ["-I", ":\(latest)"] }
-        guard let (p, pipe) = ytdlp(args + [url]), (try? p.run()) != nil else { return [] }
+        guard let (p, pipe) = Self.ytdlp(args + [url]), (try? p.run()) != nil else { return [] }
+        listing.append(p)
+        defer { listing.removeAll { $0 === p } }
+        // 시간 제한: 최신 목록 확인은 2분, 채널 전체 목록(등록할 때)은 10분. 넘으면 끝낸다.
+        let limit = Task {
+            guard (try? await Task.sleep(for: .seconds(latest == nil ? 600 : 120))) != nil else { return }
+            Self.forceKill(p)
+        }
+        defer { limit.cancel() }
         var lines: [String] = []
         do {
             for try await line in pipe.fileHandleForReading.bytes.lines { lines.append(line) }
@@ -291,12 +418,13 @@ final class DownloadStore {
         return lines
     }
 
-    func register(_ url: String) {
+    /// folder 가 nil 이면 "저장 위치/채널 이름" 에 저장한다.
+    func register(_ url: String, folder: String? = nil) {
         if registering.contains(url) { return }
         registering.append(url)
         Task { @MainActor in
             defer { registering.removeAll { $0 == url } }
-            let lines = await Self.listChannel(url)
+            let lines = await listChannel(url)
             let error = lines.last { $0.hasPrefix("ERROR:") }
             // 목록을 끝까지 못 읽었으면 등록하지 않는다. 빠진 옛 영상이 새 영상으로 잡히기 때문이다.
             guard error == nil, let head = lines.first(where: { $0.hasPrefix("CH UC") }) else {
@@ -309,22 +437,38 @@ final class DownloadStore {
                 return
             }
             let name = f.count > 2 ? f[2] : f[1]
-            let folder = Self.outputDir + "/" + name.replacingOccurrences(of: "/", with: "_")
+            let folder = folder ?? Self.outputDir + "/" + name.replacingOccurrences(of: "/", with: "_")
             channels.append(Channel(id: f[1], name: name, url: "https://www.youtube.com/channel/\(f[1])",
                                     folder: folder, baseline: Self.videoIDs(lines), addedAt: .now))
             saveChannels()
+            scheduleWatch()
         }
     }
 
     func remove(_ channel: Channel) {
         channels.removeAll { $0.id == channel.id }
+        channelStatus[channel.id] = nil
         saveChannels()
+        scheduleWatch()
     }
 
     func setFolder(_ channel: Channel, _ folder: String) {
         guard let i = channels.firstIndex(where: { $0.id == channel.id }) else { return }
         channels[i].folder = folder
         saveChannels()
+    }
+
+    func setPaused(_ channel: Channel, _ paused: Bool) {
+        guard let i = channels.firstIndex(where: { $0.id == channel.id }) else { return }
+        channels[i].paused = paused
+        saveChannels()
+        scheduleWatch()
+    }
+
+    /// 이 채널에서 받은 영상 ID (yt-dlp 기록 파일의 "youtube 영상ID" 줄)
+    func downloadedIDs(_ channel: Channel) -> [String] {
+        (try? String(contentsOf: channel.archive, encoding: .utf8))?
+            .split(separator: "\n").compactMap { $0.split(separator: " ").last.map(String.init) } ?? []
     }
 
     func isDownloadingAll(_ channel: Channel) -> Bool {
@@ -338,34 +482,55 @@ final class DownloadStore {
                            archive: channel.archive.path, batchName: channel.name))
     }
 
-    /// 앱이 켜져 있는 동안 등록한 채널의 새 영상을 확인한다. 켤 때 한 번, 그 뒤로 30분마다.
-    func watch() async {
-        while !Task.isCancelled {
-            await checkAll()
-            try? await Task.sleep(for: .seconds(30 * 60))
+    init() {
+        scheduleWatch()
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shutdown() }
         }
     }
 
+    /// 다음 새 영상 확인을 예약한다. 채널이나 설정이 바뀔 때마다 다시 부른다.
+    /// 자동 받기를 켠 채널이 없거나 확인 주기가 "안 함" 이면 아무것도 돌리지 않는다.
+    /// 앱이 켜져 있는 동안만 돈다. 켠 직후 한 번 확인하고, 그 뒤로 주기마다 한 번 깨어난다.
+    func scheduleWatch() {
+        watchTask?.cancel()
+        watchTask = nil
+        let defaults = UserDefaults.standard
+        let minutes = defaults.object(forKey: "checkMinutes") == nil ? 30 : defaults.integer(forKey: "checkMinutes")
+        guard minutes > 0, channels.contains(where: { $0.paused != true }) else { return }
+        watchTask = Task {
+            while !Task.isCancelled {
+                let wait = lastCheck.addingTimeInterval(Double(minutes * 60)).timeIntervalSinceNow
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                } else {
+                    await checkAll()
+                }
+            }
+        }
+    }
+
+    /// 자동 받기를 켜 둔 채널을 모두 확인한다.
     func checkAll() async {
         if checking { return }
         checking = true
         defer { checking = false }
-        for channel in channels { await check(channel) }
+        lastCheck = .now
+        for channel in channels where channel.paused != true { await check(channel) }
     }
 
-    private func check(_ channel: Channel) async {
+    func check(_ channel: Channel) async {
         channelStatus[channel.id] = "새 영상 확인 중"
         // ponytail: 탭마다 최신 30개만 본다(요청 1번). 앱을 꺼 둔 사이 한 탭에 30개 넘게 올라오면
         // 그 앞 영상은 놓친다. 필요해지면 아는 영상이 나올 때까지 더 읽게 바꾼다.
-        let lines = await Self.listChannel(channel.url, latest: 30)
+        let lines = await listChannel(channel.url, latest: 30)
         let time = Date.now.formatted(date: .omitted, time: .shortened)
         if lines.contains(where: { $0.hasPrefix("ERROR:") }) || !lines.contains(where: { $0.hasPrefix("CH UC") }) {
             channelStatus[channel.id] = "\(time) 확인 실패"
             return
         }
-        let archived = (try? String(contentsOf: channel.archive, encoding: .utf8))?
-            .split(separator: "\n").compactMap { $0.split(separator: " ").last.map(String.init) } ?? []
-        let known = Set(channel.baseline).union(archived)
+        let known = Set(channel.baseline).union(downloadedIDs(channel))
         let fresh = Self.videoIDs(lines).filter { !known.contains($0) && attempted.insert($0).inserted }
         for id in fresh {
             start(DownloadItem(url: "https://www.youtube.com/watch?v=\(id)",
@@ -395,58 +560,39 @@ final class DownloadStore {
 struct ContentView: View {
     let store: DownloadStore
     @AppStorage("outputDir") private var outputDir = defaultOutputDir
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
-            if store.items.isEmpty && store.channels.isEmpty && store.registering.isEmpty {
+            if store.items.isEmpty {
                 ContentUnavailableView {
                     Label("링크를 붙여넣으세요", systemImage: "arrow.down.circle")
                 } description: {
-                    Text("유튜브·인스타그램·X 영상 주소를 복사한 뒤 이 창에서 ⌘V 를 누르면\n최고 화질로 바로 받습니다.\n유튜브 채널 주소를 붙여넣으면 채널을 등록해 새 영상을 자동으로 받습니다.")
+                    Text("유튜브·인스타그램·X 영상 주소를 복사한 뒤 이 창에서 ⌘V 를 누르면\n최고 화질로 바로 받습니다.\n유튜브 채널은 채널 관리(⌘2)에서 등록합니다.")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    if !store.channels.isEmpty || !store.registering.isEmpty {
-                        Section("채널") {
-                            ForEach(store.registering, id: \.self) { url in
-                                HStack(spacing: 8) {
-                                    ProgressView().controlSize(.small)
-                                    Text("채널 등록 중  \(url)")
-                                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                                }
-                            }
-                            ForEach(store.channels) { channel in
-                                ChannelRow(channel: channel, store: store)
-                            }
-                        }
-                    }
-                    if !store.items.isEmpty {
-                        Section("받기") {
-                            ForEach(store.items) { item in
-                                ItemRow(item: item, store: store)
-                            }
-                        }
-                    }
+                List(store.items) { item in
+                    ItemRow(item: item, store: store)
                 }
             }
             Divider()
             footer
         }
         .frame(minWidth: 520, minHeight: 300)
-        .task { await store.watch() }
-        .alert("VideoGrab", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
-        } message: {
-            Text(store.alert ?? "")
+        // 채널 주소를 붙여넣었으면 채널 관리 창을 열어 추가 창을 띄운다
+        .onChange(of: store.addDraft?.id) { _, id in
+            if id != nil { openWindow(id: "channels") }
         }
         .toolbar {
             Button("링크 붙여넣기", systemImage: "doc.on.clipboard") { store.pasteFromClipboard() }
                 .help("클립보드의 링크 받기 (⌘V)")
-            Button("새 영상 확인", systemImage: "arrow.clockwise") { Task { await store.checkAll() } }
-                .help("등록한 채널의 새 영상을 지금 확인")
-                .disabled(store.channels.isEmpty)
+            Button("채널 관리", systemImage: "play.tv") { openWindow(id: "channels") }
+                .help("유튜브 채널 등록·삭제, 채널별 저장 폴더 (⌘2)")
+            SettingsLink { Label("설정", systemImage: "gearshape") }
+                .help("설정 (⌘,)")
             Button("끝난 항목 지우기", systemImage: "trash") { store.clearFinished() }
-                .disabled(!store.items.contains { $0.status != .running })
+                .disabled(!store.items.contains { !$0.isActive })
         }
     }
 
@@ -471,7 +617,6 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
-
 }
 
 @MainActor
@@ -485,50 +630,262 @@ func pickFolder(startingAt path: String) -> String? {
     return panel.runModal() == .OK ? panel.url?.path : nil
 }
 
-struct ChannelRow: View {
+// MARK: 설정 창
+
+struct SettingsView: View {
+    let store: DownloadStore
+    @AppStorage("outputDir") private var outputDir = defaultOutputDir
+    @AppStorage("checkMinutes") private var checkMinutes = 30
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("저장 위치") {
+                    Text(tilde(outputDir))
+                        .lineLimit(1).truncationMode(.middle)
+                        .foregroundStyle(.secondary).textSelection(.enabled)
+                    Button("변경…") {
+                        if let path = pickFolder(startingAt: outputDir) { outputDir = path }
+                    }
+                }
+            } header: {
+                Text("영상 받기")
+            } footer: {
+                Text("주소를 붙여넣어 받는 영상을 저장하는 곳입니다. 채널 영상은 채널마다 정한 폴더에 저장합니다.")
+            }
+            Section {
+                Picker("새 영상 확인", selection: $checkMinutes) {
+                    Text("15분마다").tag(15)
+                    Text("30분마다").tag(30)
+                    Text("1시간마다").tag(60)
+                    Text("3시간마다").tag(180)
+                    Divider()
+                    Text("자동으로 확인 안 함").tag(0)
+                }
+                Button("채널 관리 열기…") { openWindow(id: "channels") }
+            } header: {
+                Text("채널")
+            } footer: {
+                Text("앱이 켜져 있는 동안에만 확인합니다. 켤 때 한 번 확인하고, 그 뒤로 이 주기마다 확인합니다. 새 영상은 한 번에 하나씩 받습니다.")
+            }
+            .onChange(of: checkMinutes) { store.scheduleWatch() }
+            Section {
+                ForEach(["yt-dlp", "ffmpeg", "deno"], id: \.self) { tool in
+                    LabeledContent(tool) {
+                        if let path = DownloadStore.findTool(tool) {
+                            Text(path).foregroundStyle(.secondary).textSelection(.enabled)
+                        } else {
+                            Text("없음").foregroundStyle(.red)
+                        }
+                    }
+                }
+            } header: {
+                Text("받기 도구")
+            } footer: {
+                Text("없는 도구는 터미널에서 brew install yt-dlp ffmpeg deno 로 설치합니다.")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 500)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: 채널 관리 창
+
+struct ChannelManager: View {
+    @Bindable var store: DownloadStore
+    @State private var selection: Channel.ID?
+    @State private var deleting: Channel?
+
+    private var selected: Channel? { store.channels.first { $0.id == selection } }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: $selection) {
+                ForEach(store.registering, id: \.self) { _ in
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("채널 등록 중").foregroundStyle(.secondary)
+                    }
+                    .selectionDisabled()
+                }
+                ForEach(store.channels) { channel in
+                    Label(channel.name, systemImage: channel.paused == true ? "pause.circle" : "play.tv")
+                        .contextMenu {
+                            Button("채널 삭제…", role: .destructive) { deleting = channel }
+                        }
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
+            .onDeleteCommand { deleting = selected }
+        } detail: {
+            if let channel = selected {
+                ChannelDetail(channel: channel, store: store)
+            } else {
+                ContentUnavailableView {
+                    Label(store.channels.isEmpty ? "등록한 채널이 없습니다" : "채널을 선택하세요", systemImage: "play.tv")
+                } description: {
+                    Text("유튜브 채널을 등록하면 채널 영상을 한꺼번에 받거나\n새로 올라오는 영상을 자동으로 받습니다.")
+                } actions: {
+                    Button("채널 추가…") { add() }
+                }
+            }
+        }
+        .frame(minWidth: 640, minHeight: 380)
+        .toolbar {
+            Button("채널 추가", systemImage: "plus") { add() }
+                .help("유튜브 채널 추가")
+            Button("채널 삭제", systemImage: "trash") { deleting = selected }
+                .help("선택한 채널 삭제")
+                .disabled(selected == nil)
+            Button("새 영상 확인", systemImage: "arrow.clockwise") { Task { await store.checkAll() } }
+                .help("자동 받기를 켠 채널의 새 영상을 지금 확인")
+                .disabled(store.channels.isEmpty)
+        }
+        .sheet(item: $store.addDraft) { draft in
+            AddChannelSheet(draft: draft, store: store)
+        }
+        .confirmationDialog("「\(deleting?.name ?? "")」 채널을 삭제할까요?",
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            presenting: deleting) { channel in
+            Button("삭제", role: .destructive) { store.remove(channel) }
+            Button("취소", role: .cancel) {}
+        } message: { _ in
+            Text("이 채널의 새 영상을 더는 확인하지 않습니다. 받은 파일은 그대로 남습니다.")
+        }
+        .alert("VideoGrab", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
+        } message: {
+            Text(store.alert ?? "")
+        }
+        .onAppear { selection = selection ?? store.channels.first?.id }
+        .onChange(of: store.channels.map(\.id)) { old, new in
+            // 새로 등록한 채널을 고르고, 고른 채널이 지워졌으면 첫 채널로 옮긴다
+            if let added = new.first(where: { !old.contains($0) }) {
+                selection = added
+            } else if let current = selection, !new.contains(current) {
+                selection = new.first
+            }
+        }
+    }
+
+    private func add() {
+        // 클립보드에 채널 주소가 있으면 미리 채워 둔다
+        let clip = NSPasteboard.general.string(forType: .string) ?? ""
+        store.addDraft = AddDraft(url: DownloadStore.extractURLs(clip).compactMap(DownloadStore.channelURL).first ?? "")
+    }
+}
+
+struct ChannelDetail: View {
     let channel: Channel
     let store: DownloadStore
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "play.tv")
-                .font(.title3).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name).lineLimit(1)
-                Text("\((channel.folder as NSString).abbreviatingWithTildeInPath)  ·  \(status)")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
+        Form {
+            Section {
+                LabeledContent("채널") {
+                    if let url = URL(string: channel.url) { Link(channel.name, destination: url) }
+                }
+                LabeledContent("등록한 날") {
+                    Text(channel.addedAt.formatted(date: .long, time: .shortened))
+                }
             }
-            Spacer()
-            Button("전체 받기") { store.downloadAll(channel) }
+            Section {
+                LabeledContent("저장 폴더") {
+                    Text(tilde(channel.folder))
+                        .lineLimit(2).truncationMode(.middle)
+                        .foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                HStack {
+                    Button("폴더 변경…") {
+                        if let path = pickFolder(startingAt: channel.folder) { store.setFolder(channel, path) }
+                    }
+                    Button("Finder 에서 열기") {
+                        try? FileManager.default.createDirectory(atPath: channel.folder, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(URL(fileURLWithPath: channel.folder))
+                    }
+                }
+            } footer: {
+                Text("이 채널의 영상만 저장하는 폴더입니다. 바꾼 뒤에 받는 영상부터 새 폴더에 저장합니다.")
+            }
+            Section {
+                Toggle("새 영상 자동 받기", isOn: Binding(get: { channel.paused != true },
+                                                   set: { store.setPaused(channel, !$0) }))
+                LabeledContent("확인 결과") {
+                    Text(store.channelStatus[channel.id] ?? "아직 확인하지 않음").foregroundStyle(.secondary)
+                }
+                Button("지금 확인") { Task { await store.check(channel) } }
+            } footer: {
+                Text("등록한 뒤에 올라온 영상만 받습니다. 등록할 때 이미 있던 영상 \(channel.baseline.count)개는 자동으로 받지 않습니다.")
+            }
+            Section {
+                LabeledContent("받은 영상") {
+                    Text("\(store.downloadedIDs(channel).count)개").foregroundStyle(.secondary)
+                }
+                Button(store.isDownloadingAll(channel) ? "전체 받는 중" : "채널 영상 전체 받기") {
+                    store.downloadAll(channel)
+                }
                 .disabled(store.isDownloadingAll(channel))
-                .help("이 채널의 영상을 모두 받기. 이미 받은 영상은 건너뜀")
-            Menu {
-                Button("저장 폴더 변경…") {
-                    if let path = pickFolder(startingAt: channel.folder) { store.setFolder(channel, path) }
-                }
-                Button("Finder 에서 열기") {
-                    try? FileManager.default.createDirectory(atPath: channel.folder, withIntermediateDirectories: true)
-                    NSWorkspace.shared.open(URL(fileURLWithPath: channel.folder))
-                }
-                Button("채널 페이지 열기") {
-                    if let url = URL(string: channel.url) { NSWorkspace.shared.open(url) }
-                }
-                Divider()
-                Button("등록 해제", role: .destructive) { store.remove(channel) }
-            } label: {
-                Label("채널 메뉴", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+            } footer: {
+                Text("동영상·쇼츠·지난 라이브를 모두 받습니다. 이미 받은 영상은 건너뜁니다. 진행 상황은 VideoGrab 창(⌘1)에 나옵니다.")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
-        .padding(.vertical, 4)
+        .formStyle(.grouped)
+    }
+}
+
+struct AddChannelSheet: View {
+    let store: DownloadStore
+    @State private var url: String
+    @State private var folder: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(draft: AddDraft, store: DownloadStore) {
+        self.store = store
+        _url = State(initialValue: draft.url)
     }
 
-    private var status: String {
-        store.channelStatus[channel.id]
-            ?? "새 영상 자동 받기 · \(channel.addedAt.formatted(date: .numeric, time: .omitted)) 등록"
+    // 입력한 주소가 유튜브 채널 주소면 정리한 주소, 아니면 nil. https:// 를 빼고 적어도 받는다.
+    private var channelURL: String? {
+        let text = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DownloadStore.channelURL(text.contains("://") ? text : "https://" + text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("채널 추가").font(.headline)
+            Form {
+                TextField("채널 주소", text: $url, prompt: Text("https://www.youtube.com/@이름"))
+                LabeledContent("저장 폴더") {
+                    Text(folder.map(tilde) ?? tilde(DownloadStore.outputDir) + "/채널 이름")
+                        .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                    Button("선택…") {
+                        if let path = pickFolder(startingAt: folder ?? DownloadStore.outputDir) { folder = path }
+                    }
+                }
+            }
+            if !url.isEmpty && channelURL == nil {
+                Text(verbatim: "유튜브 채널 주소가 아닙니다. 예: https://www.youtube.com/@이름")
+                    .font(.caption).foregroundStyle(.red)
+            } else {
+                Text("등록한 뒤에 올라오는 영상부터 자동으로 받습니다. 이미 있는 영상은 등록한 뒤 「채널 영상 전체 받기」로 받습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("취소", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("등록") {
+                    if let channelURL { store.register(channelURL, folder: folder) }
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(channelURL == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
     }
 }
 
@@ -549,6 +906,8 @@ struct ItemRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 switch item.status {
+                case .waiting:
+                    Text("대기 중").font(.caption).foregroundStyle(.secondary)
                 case .running:
                     ProgressView(value: item.progress)
                     Text(runningText)
@@ -565,7 +924,7 @@ struct ItemRow: View {
             }
             Spacer()
             switch item.status {
-            case .running:
+            case .waiting, .running:
                 Button("취소", systemImage: "xmark.circle") { store.cancel(item) }
                     .labelStyle(.iconOnly).buttonStyle(.borderless)
             case .done:
