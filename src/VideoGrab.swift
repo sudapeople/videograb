@@ -16,6 +16,27 @@ var dataDir: URL {
     return dir
 }
 
+// 채널 영상의 종류. 값은 유튜브 채널 주소 뒤에 붙는 탭 이름이다 (채널주소/videos 등).
+enum Kind: String, CaseIterable, Identifiable {
+    case videos, shorts, streams
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .videos: "동영상"
+        case .shorts: "쇼츠"
+        case .streams: "라이브"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .videos: "동영상 (롱폼)"
+        case .shorts: "쇼츠 (숏폼)"
+        case .streams: "라이브 (지난 방송)"
+        }
+    }
+}
+
 // 등록한 유튜브 채널. 등록할 때 이미 있던 영상(baseline) 밖의 영상이 "새 영상" 이다.
 struct Channel: Codable, Identifiable {
     let id: String          // UC 로 시작하는 채널 ID
@@ -24,7 +45,13 @@ struct Channel: Codable, Identifiable {
     var folder: String      // 이 채널 영상을 저장하는 곳
     let baseline: [String]
     let addedAt: Date
-    var paused: Bool?       // true 면 새 영상 자동 받기를 꺼 둔 채널
+    var paused: Bool?       // 1.2 까지의 기록: true 면 새 영상 자동 받기를 꺼 둔 채널
+    var auto: [String]?     // 새 영상을 자동으로 받을 종류. 없으면(1.2 까지의 기록) paused 를 따른다
+
+    var autoKinds: Set<Kind> {
+        if let auto { return Set(auto.compactMap(Kind.init(rawValue:))) }
+        return paused == true ? [] : Set(Kind.allCases)
+    }
 
     // yt-dlp 가 받은 영상 ID 를 적어 두는 파일. 전체 받기와 자동 받기가 같이 쓴다.
     var archive: URL { dataDir.appendingPathComponent("\(id).txt") }
@@ -198,6 +225,11 @@ final class DownloadItem: Identifiable {
         process = nil
         if status == .cancelled { return }
         let error = lastError ?? "yt-dlp 종료 코드 \(code)"
+        // 쇼츠나 라이브를 올린 적 없는 채널에서 그 종류를 전체 받기 한 경우
+        if code != 0, error.contains("does not have a") {
+            status = .failed("이 채널에는 그 종류의 영상이 없습니다")
+            return
+        }
         status = code == 0 ? .done : .failed(batchName == nil ? error : "\(count)개 받음, 일부 실패 · \(error)")
     }
 }
@@ -558,9 +590,13 @@ final class DownloadStore {
         saveChannels()
     }
 
-    func setPaused(_ channel: Channel, _ paused: Bool) {
+    /// 이 채널에서 한 종류(동영상·쇼츠·라이브)의 새 영상 자동 받기를 켜고 끈다.
+    func setAuto(_ channel: Channel, _ kind: Kind, _ on: Bool) {
         guard let i = channels.firstIndex(where: { $0.id == channel.id }) else { return }
-        channels[i].paused = paused
+        var kinds = channels[i].autoKinds
+        if on { kinds.insert(kind) } else { kinds.remove(kind) }
+        channels[i].auto = Kind.allCases.filter(kinds.contains).map(\.rawValue)
+        channels[i].paused = nil
         saveChannels()
         scheduleWatch()
     }
@@ -571,15 +607,16 @@ final class DownloadStore {
             .split(separator: "\n").compactMap { $0.split(separator: " ").last.map(String.init) } ?? []
     }
 
-    func isDownloadingAll(_ channel: Channel) -> Bool {
-        items.contains { $0.batchName != nil && $0.url == channel.url && $0.status == .running }
+    func isDownloadingAll(_ channel: Channel, _ kind: Kind) -> Bool {
+        items.contains { $0.batchName != nil && $0.url == "\(channel.url)/\(kind.rawValue)" && $0.status == .running }
     }
 
-    /// 채널 영상 전체 받기. yt-dlp 하나가 차례로 받고, 받은 영상은 기록 파일 덕에 다시 받지 않는다.
-    func downloadAll(_ channel: Channel) {
-        if isDownloadingAll(channel) { return }
-        start(DownloadItem(url: channel.url, folder: channel.folder,
-                           archive: channel.archive.path, batchName: channel.name))
+    /// 채널의 한 종류(동영상·쇼츠·라이브)를 전체 받기. yt-dlp 하나가 차례로 받고,
+    /// 받은 영상은 기록 파일 덕에 다시 받지 않는다.
+    func downloadAll(_ channel: Channel, _ kind: Kind) {
+        if isDownloadingAll(channel, kind) { return }
+        start(DownloadItem(url: "\(channel.url)/\(kind.rawValue)", folder: channel.folder,
+                           archive: channel.archive.path, batchName: "\(channel.name) \(kind.label)"))
     }
 
     init() {
@@ -598,7 +635,7 @@ final class DownloadStore {
         watchTask = nil
         let defaults = UserDefaults.standard
         let minutes = defaults.object(forKey: "checkMinutes") == nil ? 30 : defaults.integer(forKey: "checkMinutes")
-        guard minutes > 0, channels.contains(where: { $0.paused != true }) else { return }
+        guard minutes > 0, channels.contains(where: { !$0.autoKinds.isEmpty }) else { return }
         watchTask = Task {
             while !Task.isCancelled {
                 let interval = Double((lastCheckFailed ? min(minutes, 5) : minutes) * 60)
@@ -619,33 +656,40 @@ final class DownloadStore {
         defer { checking = false }
         lastCheck = .now
         var failed = false
-        for channel in channels where channel.paused != true {
+        for channel in channels where !channel.autoKinds.isEmpty {
             if !(await check(channel)) { failed = true }
         }
         lastCheckFailed = failed
     }
 
+    /// 채널에서 자동 받기를 켠 종류의 새 영상을 찾아 받기를 건다. 하나라도 확인하지 못하면 false.
     @discardableResult
     func check(_ channel: Channel) async -> Bool {
         channelStatus[channel.id] = "새 영상 확인 중"
-        // ponytail: 탭마다 최신 30개만 본다(요청 1번). 앱을 꺼 둔 사이 한 탭에 30개 넘게 올라오면
-        // 그 앞 영상은 놓친다. 필요해지면 아는 영상이 나올 때까지 더 읽게 바꾼다.
-        let lines = await listChannel(channel.url, latest: 30)
-        let time = Date.now.formatted(date: .omitted, time: .shortened)
-        if lines.contains(where: { $0.hasPrefix("ERROR:") }) || !lines.contains(where: { $0.hasPrefix("CH UC") }) {
-            channelStatus[channel.id] = "\(time) 확인 실패"
-            return false
-        }
         let known = Set(channel.baseline).union(downloadedIDs(channel))
-        let fresh = Self.videoIDs(lines).filter { !known.contains($0) && attempted.insert($0).inserted }
+        var fresh: [String] = []
+        var failed = false
+        for kind in Kind.allCases where channel.autoKinds.contains(kind) {
+            // ponytail: 종류마다 최신 30개만 본다(요청 1번). 앱을 꺼 둔 사이 한 종류에 30개 넘게 올라오면
+            // 그 앞 영상은 놓친다. 필요해지면 아는 영상이 나올 때까지 더 읽게 바꾼다.
+            let lines = await listChannel("\(channel.url)/\(kind.rawValue)", latest: 30)
+            if let error = lines.last(where: { $0.hasPrefix("ERROR:") }) {
+                // 쇼츠나 라이브를 올린 적 없는 채널은 그 탭이 없다. 실패가 아니다
+                if !error.contains("does not have a") { failed = true }
+                continue
+            }
+            if !lines.contains(where: { $0.hasPrefix("CH UC") }) { failed = true; continue }
+            fresh += Self.videoIDs(lines).filter { !known.contains($0) && attempted.insert($0).inserted }
+        }
         for id in fresh {
             let item = DownloadItem(url: "https://www.youtube.com/watch?v=\(id)",
                                     folder: channel.folder, archive: channel.archive.path)
             item.channelName = channel.name
             start(item)
         }
-        channelStatus[channel.id] = "\(time) 확인" + (fresh.isEmpty ? "" : " · 새 영상 \(fresh.count)개")
-        return true
+        let time = Date.now.formatted(date: .omitted, time: .shortened)
+        channelStatus[channel.id] = "\(time) 확인" + (failed ? " 실패" : "") + (fresh.isEmpty ? "" : " · 새 영상 \(fresh.count)개")
+        return !failed
     }
 
     static func selfTest() {
@@ -660,6 +704,12 @@ final class DownloadStore {
         precondition(nameTemplate("https://www.instagram.com/reel/abc/").contains("[%(id)s]"))
         precondition(nameTemplate("https://x.com/a/status/1").contains("[%(id)s]"))
         precondition(!nameTemplate("https://www.youtube.com/watch?v=l5UC2--WFq8").contains("%(id)s"))
+        var channel = Channel(id: "UCx", name: "x", url: "u", folder: "f", baseline: [], addedAt: .now)
+        precondition(channel.autoKinds == Set(Kind.allCases))    // 기록이 없으면 모두 켜짐
+        channel.paused = true
+        precondition(channel.autoKinds.isEmpty)                  // 1.2 까지의 "꺼 둔 채널"
+        channel.auto = ["shorts", "모르는 값"]
+        precondition(channel.autoKinds == [.shorts])             // 새 기록이 있으면 그것을 따른다
         print("자체 점검 통과")
     }
 }
@@ -899,7 +949,7 @@ struct ChannelManager: View {
                     .selectionDisabled()
                 }
                 ForEach(store.channels) { channel in
-                    Label(channel.name, systemImage: channel.paused == true ? "pause.circle" : "play.tv")
+                    Label(channel.name, systemImage: channel.autoKinds.isEmpty ? "pause.circle" : "play.tv")
                         .contextMenu {
                             Button("채널 삭제…", role: .destructive) { deleting = channel }
                         }
@@ -997,25 +1047,36 @@ struct ChannelDetail: View {
                 Text("이 채널의 영상만 저장하는 폴더입니다. 바꾼 뒤에 받는 영상부터 새 폴더에 저장합니다.")
             }
             Section {
-                Toggle("새 영상 자동 받기", isOn: Binding(get: { channel.paused != true },
-                                                   set: { store.setPaused(channel, !$0) }))
+                ForEach(Kind.allCases) { kind in
+                    Toggle(kind.detail, isOn: Binding(get: { channel.autoKinds.contains(kind) },
+                                                      set: { store.setAuto(channel, kind, $0) }))
+                }
                 LabeledContent("확인 결과") {
                     Text(store.channelStatus[channel.id] ?? "아직 확인하지 않음").foregroundStyle(.secondary)
                 }
                 Button("지금 확인") { Task { await store.check(channel) } }
+                    .disabled(channel.autoKinds.isEmpty)
+            } header: {
+                Text("새 영상 자동 받기")
             } footer: {
-                Text("등록한 뒤에 올라온 영상만 받습니다. 등록할 때 이미 있던 영상 \(channel.baseline.count)개는 자동으로 받지 않습니다.")
+                Text("켜 둔 종류만, 등록한 뒤에 올라온 영상을 받습니다. 등록할 때 이미 있던 영상 \(channel.baseline.count)개는 자동으로 받지 않습니다.")
             }
             Section {
                 LabeledContent("받은 영상") {
                     Text("\(store.downloadedIDs(channel).count)개").foregroundStyle(.secondary)
                 }
-                Button(store.isDownloadingAll(channel) ? "전체 받는 중" : "채널 영상 전체 받기") {
-                    store.downloadAll(channel)
+                HStack {
+                    ForEach(Kind.allCases) { kind in
+                        Button(store.isDownloadingAll(channel, kind) ? "\(kind.label) 받는 중" : "\(kind.label) 전체") {
+                            store.downloadAll(channel, kind)
+                        }
+                        .disabled(store.isDownloadingAll(channel, kind))
+                    }
                 }
-                .disabled(store.isDownloadingAll(channel))
+            } header: {
+                Text("전체 받기")
             } footer: {
-                Text("동영상·쇼츠·지난 라이브를 모두 받습니다. 이미 받은 영상은 건너뜁니다. 진행 상황은 VideoGrab 창(⌘1)에 나옵니다.")
+                Text("종류별로 이미 올라와 있는 영상을 모두 받습니다. 이미 받은 영상은 건너뜁니다. 진행 상황은 VideoGrab 창(⌘1)에 나옵니다.")
             }
         }
         .formStyle(.grouped)

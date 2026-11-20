@@ -70,6 +70,8 @@ brew install yt-dlp ffmpeg deno
 - 링크가 없으면 경고음만 난다
 - 그 밖에 yt-dlp 가 지원하는 사이트(치지직, 트위치 등)도 그대로 된다
 - 인스타그램·X 에서 로그인해야 보이는 영상(비공개 계정, 성인 표시 글)은 받지 못한다
+- 인스타그램은 영상·릴스 주소 하나씩만 받는다. 계정을 등록해 새 글을 자동으로 받는 기능은 없다
+  (yt-dlp 의 인스타그램 계정 목록 기능이 동작하지 않는다)
 
 ### 유튜브 채널 관리
 
@@ -81,9 +83,10 @@ brew install yt-dlp ffmpeg deno
   메인 창에 채널 주소를 붙여넣어도 이 추가 창이 주소가 채워진 채로 뜬다
 - 삭제 : 채널을 고르고 휴지통 버튼(또는 `delete` 키). 받은 파일은 그대로 남는다
 - 저장 폴더 : 채널마다 따로 정한다. 기본값은 `저장 위치/채널 이름` 이고 언제든 바꿀 수 있다
-- 새 영상 자동 받기 : 채널마다 켜고 끈다. 등록한 뒤에 올라온 영상만 받고, 등록할 때 이미 있던 영상은 받지 않는다.
-  앱을 꺼 둔 사이 올라온 영상은 다음에 켤 때 받는다 (탭마다 최신 30개까지)
-- 채널 영상 전체 받기 : 동영상·쇼츠·지난 라이브를 모두 차례로 받는다.
+- 새 영상 자동 받기 : 채널마다, 종류별로 켜고 끈다. 종류는 동영상(롱폼), 쇼츠(숏폼), 라이브(지난 방송) 세 가지다.
+  예를 들어 쇼츠만 켜 두면 새 쇼츠만 받는다. 등록한 뒤에 올라온 영상만 받고, 등록할 때 이미 있던 영상은 받지 않는다.
+  앱을 꺼 둔 사이 올라온 영상은 다음에 켤 때 받는다 (종류마다 최신 30개까지)
+- 전체 받기 : 종류별 버튼(동영상 전체, 쇼츠 전체, 라이브 전체)으로 그 종류만 차례로 받는다.
   받은 영상은 기록해 두므로 중간에 취소하고 다시 눌러도 이어서 받는다
 - 방송 중이거나 예정인 라이브는 끝난 뒤 다음 확인 때 받는다
 
@@ -183,7 +186,7 @@ videograb/
 │   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
-│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 1150줄)
+│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 1200줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
@@ -255,6 +258,8 @@ Other behavior
 - If the clipboard has no link, the app just beeps
 - Any other site supported by yt-dlp works too (Twitch and more)
 - Instagram and X videos that need a login (private accounts, age-restricted posts) cannot be downloaded
+- Instagram works one video or reel URL at a time. Registering an account for automatic downloads is not supported
+  (yt-dlp's Instagram user listing does not work)
 
 #### YouTube channels
 
@@ -266,9 +271,10 @@ Channels are managed in their own window, "채널 관리" (Channels). Open it wi
   Pasting a channel URL in the main window opens the same sheet with the URL filled in
 - Remove : select a channel and press the trash button (or the `delete` key). Downloaded files stay
 - Folder : each channel has its own. The default is `save location/channel name`, and you can change it at any time
-- New uploads : a per-channel switch. Only videos uploaded after you added the channel are downloaded.
-  Uploads made while the app was closed are picked up at the next launch (up to the latest 30 per tab)
-- Download all : downloads every video, short and past live stream in order.
+- New uploads : switches per channel and per kind. The kinds are videos (long-form), Shorts, and live (past streams).
+  With only Shorts on, for example, only new Shorts are downloaded. Only videos uploaded after you added the channel are downloaded.
+  Uploads made while the app was closed are picked up at the next launch (up to the latest 30 per kind)
+- Download all : one button per kind (videos, Shorts, live) downloads just that kind in order.
   Finished videos are recorded, so you can cancel and start again to continue
 - Live streams that are on air or scheduled are downloaded at a later check, after they end
 
