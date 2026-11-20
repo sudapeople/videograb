@@ -97,7 +97,22 @@ brew install yt-dlp ffmpeg deno
 - 저장 위치 : 주소를 붙여넣어 받는 영상을 저장하는 곳
 - 새 영상 확인 : 15분, 30분(기본값), 1시간, 3시간마다 또는 "자동으로 확인 안 함"
 - 상단바에서 계속 실행, 로그인할 때 자동으로 실행, 채널 영상을 받으면 알림 (모두 기본값 꺼짐. 아래 참고)
-- 받기 도구 : yt-dlp, ffmpeg, deno 가 설치되어 있는지 보여 준다
+- 앱 업데이트 : 새 버전이 있으면 알림(기본값), 자동으로 설치, 확인 안 함 (아래 참고)
+- 받기 도구 : yt-dlp, ffmpeg, deno 가 설치되어 있는지와 yt-dlp 버전을 보여 주고, "yt-dlp 업데이트" 버튼이 있다
+
+### 업데이트
+
+앱을 켤 때와 켜 둔 동안 하루에 한 번 GitHub 릴리스의 최신 버전을 확인한다.
+앱 메뉴의 "업데이트 확인…" 이나 설정의 "지금 확인" 으로 바로 볼 수도 있다.
+
+- 새 버전이 있으면 알림 (기본값) : 설정 창, 메인 창 아래, 상단바 메뉴에 "새 버전 설치" 버튼이 생긴다
+- 자동으로 설치 : 받는 중인 영상이 없고 창이 모두 닫혀 있을 때 스스로 설치하고 다시 켠다.
+  창이 열려 있으면 닫을 때까지 미룬다 (앱을 막 켠 1분 안에는 바로 설치한다)
+- 설치 과정 : zip 을 받아 SHA-256 을 릴리스의 값과 대조하고, 서명을 확인한 뒤 앱을 바꾸고 다시 켠다.
+  바꾸다 실패하면 원래 앱으로 되돌린다
+- 공증을 받지 않은 앱이라 "누가 만든 파일인지" 는 확인하지 못한다. 그래서 기본값은 자동 설치가 아니라 알림이다
+- yt-dlp 업데이트 : 유튜브가 바뀌어 갑자기 안 받아지면 설정의 "yt-dlp 업데이트" 를 누른다.
+  Homebrew 의 `brew upgrade yt-dlp` 를 실행한다
 
 ### 상단바에서 계속 실행
 
@@ -125,6 +140,7 @@ brew install yt-dlp ffmpeg deno
 - 앱이 강제 종료되거나 죽어서 yt-dlp 가 남았으면, 다음에 켤 때 찾아서 멈춘다
 - 채널 확인에는 시간 제한(2분)이 있어, 응답 없는 서버에 매달린 프로세스가 남지 않는다
 - 끝난 항목은 최근 200개만 목록에 남긴다
+- 업데이트 확인은 하루에 한 번만 깨어나고, 꺼 두면 돌지 않는다. 설치할 때 쓴 임시 파일은 끝나면 지운다
 
 ## 필요한 것
 
@@ -139,7 +155,7 @@ brew install yt-dlp ffmpeg deno
 - `ffmpeg` : 영상·오디오 합치기
 - `deno` : 유튜브 서명 해독용 자바스크립트 실행기 (yt-dlp 가 자동으로 씀)
 
-유튜브에서 갑자기 안 받아지면 먼저 갱신한다.
+유튜브에서 갑자기 안 받아지면 먼저 갱신한다. 설정 창의 "yt-dlp 업데이트" 버튼이 같은 일을 한다.
 
 ```bash
 brew upgrade yt-dlp
@@ -186,7 +202,7 @@ videograb/
 │   ├── social-preview.png               GitHub 대표 이미지 (링크 공유 때 표시)
 │   └── screenshots/                     README 용 화면
 ├── src/
-│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 1200줄)
+│   ├── VideoGrab.swift       앱 전체 (SwiftUI, 약 1500줄)
 │   └── Info.plist
 ├── scripts/
 │   ├── build.sh              빌드·설치·릴리스 zip
@@ -199,7 +215,7 @@ videograb/
 
 설정 창의 값은 `defaults read com.sudapeople.videograb` 로 볼 수 있다
 (`outputDir` 저장 위치, `checkMinutes` 새 영상 확인 주기, `keepInMenuBar` 상단바에서 계속 실행,
-`notifyNew` 알림). 값을 지우면 기본값으로 돌아간다.
+`notifyNew` 알림, `updateMode` 앱 업데이트: 0 확인 안 함, 1 알림, 2 자동 설치). 값을 지우면 기본값으로 돌아간다.
 
 등록한 채널은 `~/Library/Application Support/VideoGrab/channels.json` 에,
 채널별로 받은 영상 기록은 같은 폴더의 `채널ID.txt` 에 남는다.
@@ -285,7 +301,22 @@ Channels are managed in their own window, "채널 관리" (Channels). Open it wi
 - Save location : where pasted videos are saved
 - New upload check : every 15 minutes, 30 minutes (default), 1 hour, 3 hours, or never
 - Keep running in the menu bar, launch at login, notify on channel downloads (all off by default, see below)
-- Tools : shows whether yt-dlp, ffmpeg and deno are installed
+- App updates : notify when a new version is out (default), install automatically, or never check (see below)
+- Tools : shows whether yt-dlp, ffmpeg and deno are installed, the yt-dlp version, and an "yt-dlp 업데이트" (Update yt-dlp) button
+
+#### Updates
+
+The app checks the latest GitHub release at launch and once a day while it is running.
+"업데이트 확인…" (Check for Updates) in the app menu or "지금 확인" (Check now) in Settings checks right away.
+
+- Notify (default) : an install button appears in Settings, at the bottom of the main window, and in the menu bar menu
+- Install automatically : installs and relaunches by itself when nothing is downloading and all windows are closed.
+  With a window open it waits until you close it (within the first minute after launch it installs right away)
+- Install steps : downloads the zip, compares its SHA-256 with the value from the release, verifies the signature,
+  swaps the app and relaunches. If the swap fails, the previous app is put back
+- The app is not notarized, so the publisher of a file cannot be verified. That is why the default is to notify, not to install
+- Update yt-dlp : if YouTube changes and downloads suddenly fail, press "yt-dlp 업데이트" in Settings.
+  It runs Homebrew's `brew upgrade yt-dlp`
 
 #### Keep running in the menu bar
 
@@ -315,6 +346,7 @@ Automatic downloads run only while the app is running, and nothing runs when the
 - If the app was killed or crashed and left a yt-dlp behind, the next launch finds and stops it
 - A channel check has a time limit (2 minutes), so no process hangs on a silent server
 - Only the latest 200 finished items are kept in the list
+- The update check wakes once a day and does not run when turned off. Temporary files used for an install are removed afterwards
 
 ### Requirements
 
@@ -329,7 +361,7 @@ brew install yt-dlp ffmpeg deno
 - `ffmpeg` : merges video and audio
 - `deno` : JavaScript runtime yt-dlp uses for YouTube signature decoding
 
-If YouTube downloads suddenly fail, update yt-dlp first.
+If YouTube downloads suddenly fail, update yt-dlp first. The "yt-dlp 업데이트" button in Settings does the same thing.
 
 ```bash
 brew upgrade yt-dlp
@@ -366,8 +398,8 @@ To ship a new version:
 ### Settings
 
 `defaults read com.sudapeople.videograb` shows the values from the settings window
-(`outputDir` save location, `checkMinutes` check interval, `keepInMenuBar` menu bar mode, `notifyNew` notifications).
-Delete a value to go back to its default.
+(`outputDir` save location, `checkMinutes` check interval, `keepInMenuBar` menu bar mode, `notifyNew` notifications,
+`updateMode` app updates: 0 never, 1 notify, 2 install automatically). Delete a value to go back to its default.
 
 Registered channels are stored in `~/Library/Application Support/VideoGrab/channels.json`,
 and the per-channel record of downloaded videos in `<channel id>.txt` in the same folder.

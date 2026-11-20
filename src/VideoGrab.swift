@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 import UserNotifications
+import CryptoKit
 
 // 저장 위치 기본값. 사용자가 바꾸면 UserDefaults "outputDir" 에 남는다.
 let defaultOutputDir = FileManager.default.homeDirectoryForCurrentUser
@@ -57,6 +58,15 @@ struct Channel: Codable, Identifiable {
     var archive: URL { dataDir.appendingPathComponent("\(id).txt") }
 }
 
+// GitHub 에 올라온, 지금 버전보다 새 릴리스
+struct AppRelease {
+    let version: String
+    let zip: URL            // 내려받을 zip
+    let sha256: String      // GitHub 이 알려 주는 zip 의 확인값
+}
+
+struct UpdateError: Error { let message: String }
+
 // 채널 추가 창에 미리 채워 둘 주소
 struct AddDraft: Identifiable {
     let id = UUID()
@@ -91,6 +101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keep = UserDefaults.standard.bool(forKey: "keepInMenuBar")
         let wanted: NSApplication.ActivationPolicy = hasWindow || !keep ? .regular : .accessory
         if NSApp.activationPolicy() != wanted { NSApp.setActivationPolicy(wanted) }
+        DownloadStore.shared.installIfDeferred()    // 창을 닫아서 미뤄 둔 업데이트를 설치할 수 있게 됐는지
+    }
+
+    /// 창(최소화한 창 포함)이 하나라도 있는지
+    @MainActor static var hasWindow: Bool {
+        NSApp.windows.contains { ($0.isVisible || $0.isMiniaturized) && $0.canBecomeMain }
     }
 
     // "상단바에서 계속 실행" 이 꺼져 있으면 창을 모두 닫을 때 끝낸다. 창 없이 뒤에서 도는 프로세스를 남기지 않는다.
@@ -147,6 +163,12 @@ struct VideoGrabApp: App {
                 .keyboardShortcut("v")
                 Button("전체 선택") { NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil) }
                     .keyboardShortcut("a")
+            }
+            CommandGroup(after: .appInfo) {
+                Button("업데이트 확인…") {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    Task { await store.checkForUpdate() }
+                }
             }
             CommandGroup(replacing: .help) {
                 Button("VideoGrab 도움말") {
@@ -365,6 +387,7 @@ final class DownloadStore {
             item.finish(p.terminationStatus)
             announce(item)
             startNextAuto()
+            installIfDeferred()
         }
     }
 
@@ -462,6 +485,7 @@ final class DownloadStore {
     /// 앱을 끝낼 때: 예약과 돌고 있는 yt-dlp 를 모두 멈춘다. 뒤에 남는 프로세스가 없게 한다.
     func shutdown() {
         watchTask?.cancel()
+        updateTask?.cancel()
         let running = items.compactMap(\.process) + listing
         running.forEach { $0.interrupt() }
         let deadline = Date.now.addingTimeInterval(3)
@@ -480,7 +504,7 @@ final class DownloadStore {
     private(set) var lastCheck = Date.distantPast
     private(set) var lastCheckFailed = false    // 실패했으면 주기를 기다리지 않고 5분 뒤 다시 확인한다
     private var watchTask: Task<Void, Never>?   // 다음 새 영상 확인 예약. 확인할 채널이 없으면 nil
-    private var listing: [Process] = []         // 채널 목록을 가져오는 중인 yt-dlp
+    private var listing: [Process] = []         // 목록 조회·도구 실행처럼 출력을 모으는 중인 프로세스
     private var attempted = Set<String>()   // 이번 실행에서 자동 받기를 건 영상. 실패한 영상을 30분마다 되풀이하지 않게
 
     static var channelsFile: URL { dataDir.appendingPathComponent("channels.json") }
@@ -534,19 +558,26 @@ final class DownloadStore {
                     "--print", "playlist:CH %(channel_id)s %(channel)s",
                     "--print", "%(id)s %(live_status)s"]
         if let latest { args += ["-I", ":\(latest)"] }
-        guard let (p, pipe) = Self.ytdlp(args + [url]), (try? p.run()) != nil else { return [] }
+        guard let (p, pipe) = Self.ytdlp(args + [url]) else { return [] }
+        // 시간 제한: 최신 목록 확인은 2분, 채널 전체 목록(등록할 때)은 10분
+        return await collect(p, pipe, limit: latest == nil ? 600 : 120)
+    }
+
+    /// 프로세스를 돌려 출력 줄을 모은다. 시간 제한을 넘으면 끝내고, 앱을 끝낼 때도 같이 멈춘다.
+    func collect(_ p: Process, _ pipe: Pipe, limit: Int) async -> [String] {
+        guard (try? p.run()) != nil else { return [] }
         listing.append(p)
         defer { listing.removeAll { $0 === p } }
-        // 시간 제한: 최신 목록 확인은 2분, 채널 전체 목록(등록할 때)은 10분. 넘으면 끝낸다.
-        let limit = Task {
-            guard (try? await Task.sleep(for: .seconds(latest == nil ? 600 : 120))) != nil else { return }
+        let timer = Task {
+            guard (try? await Task.sleep(for: .seconds(limit))) != nil else { return }
             Self.forceKill(p)
         }
-        defer { limit.cancel() }
+        defer { timer.cancel() }
         var lines: [String] = []
         do {
             for try await line in pipe.fileHandleForReading.bytes.lines { lines.append(line) }
         } catch {}
+        while p.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
         return lines
     }
 
@@ -621,6 +652,7 @@ final class DownloadStore {
 
     init() {
         scheduleWatch()
+        scheduleUpdateCheck()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.shutdown() }
@@ -692,6 +724,224 @@ final class DownloadStore {
         return !failed
     }
 
+    // MARK: 업데이트
+
+    static let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    static let launchedAt = Date.now
+
+    private(set) var newRelease: AppRelease?    // 지금 버전보다 새 릴리스가 있으면
+    private(set) var updateStatus = ""          // 설정 창에 보일 한 줄
+    private(set) var ytdlpVersion: String?
+    private(set) var toolStatus = ""            // 설정 창의 받기 도구 칸에 보일 한 줄
+    private(set) var toolBusy = false
+    private var updateTask: Task<Void, Never>?  // 하루 한 번 업데이트 확인 예약. 확인을 꺼 두면 nil
+    private var installing = false
+    private var installDeferred = false         // 받는 중이거나 창이 열려 있어 설치를 미뤄 둔 상태
+
+    /// 0 확인 안 함, 1 새 버전이 있으면 알림(기본값), 2 자동으로 설치
+    static var updateMode: Int {
+        let defaults = UserDefaults.standard
+        return defaults.object(forKey: "updateMode") == nil ? 1 : defaults.integer(forKey: "updateMode")
+    }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        a.compare(b, options: .numeric) == .orderedDescending
+    }
+
+    /// 업데이트 확인 예약. 켤 때 한 번, 그 뒤로 하루에 한 번. "확인 안 함" 이면 아무것도 돌리지 않는다.
+    func scheduleUpdateCheck() {
+        updateTask?.cancel()
+        updateTask = nil
+        guard Self.updateMode > 0 else { return }
+        updateTask = Task {
+            while !Task.isCancelled {
+                await checkForUpdate()
+                try? await Task.sleep(for: .seconds(24 * 60 * 60))
+            }
+        }
+    }
+
+    /// GitHub 의 최신 릴리스를 지금 버전과 비교한다. "자동으로 설치" 면 이어서 설치한다.
+    func checkForUpdate() async {
+        updateStatus = "확인 중"
+        // 한 번 쓰고 닫는 세션. 연결을 남겨 두지 않는다
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.finishTasksAndInvalidate() }
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/sudapeople/videograb/releases/latest")!)
+        request.timeoutInterval = 20
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await session.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = json["tag_name"] as? String else {
+            updateStatus = "업데이트를 확인하지 못했습니다"
+            return
+        }
+        let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        guard Self.isNewer(version, than: Self.currentVersion) else {
+            newRelease = nil
+            updateStatus = "최신 버전입니다"
+            return
+        }
+        let asset = (json["assets"] as? [[String: Any]])?.first { ($0["name"] as? String)?.hasSuffix("-arm64.zip") == true }
+        guard let link = asset?["browser_download_url"] as? String, let zip = URL(string: link),
+              let digest = asset?["digest"] as? String, digest.hasPrefix("sha256:") else {
+            updateStatus = "새 버전 \(version) 이 있지만 설치 파일을 찾지 못했습니다"
+            return
+        }
+        newRelease = AppRelease(version: version, zip: zip, sha256: String(digest.dropFirst(7)))
+        updateStatus = "새 버전 \(version) 이 있습니다"
+        if Self.updateMode == 2 {
+            await installUpdate(automatic: true)
+        } else if UserDefaults.standard.string(forKey: "notifiedVersion") != version {
+            // 같은 버전은 한 번만 알린다 (알림을 허용해 둔 경우에만 보인다)
+            UserDefaults.standard.set(version, forKey: "notifiedVersion")
+            let content = UNMutableNotificationContent()
+            content.title = "VideoGrab \(version) 이 나왔습니다"
+            content.body = "설정 창에서 설치할 수 있습니다."
+            try? await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: "update-\(version)", content: content, trigger: nil))
+        }
+    }
+
+    /// 미뤄 둔 설치가 있고 이제 설치할 수 있으면 설치한다. 받기가 끝날 때와 창이 닫힐 때 부른다.
+    func installIfDeferred() {
+        guard installDeferred, !installing else { return }
+        Task { await installUpdate(automatic: true) }
+    }
+
+    /// 새 버전을 받아 확인값을 대조하고, 앱을 바꾼 뒤 다시 켠다.
+    /// automatic 이면 쓰는 중에 갑자기 꺼지지 않게, 받는 중이거나 창이 열려 있을 때는 미룬다
+    /// (앱을 막 켠 1분 안은 예외로 바로 설치한다).
+    func installUpdate(automatic: Bool) async {
+        guard let release = newRelease, !installing else { return }
+        if items.contains(where: \.isActive) {
+            installDeferred = true
+            updateStatus = "새 버전 \(release.version): 받는 중인 항목이 끝나면 설치합니다"
+            return
+        }
+        if automatic, AppDelegate.hasWindow, Date.now.timeIntervalSince(Self.launchedAt) > 60 {
+            installDeferred = true
+            updateStatus = "새 버전 \(release.version): 창을 모두 닫으면 설치합니다"
+            return
+        }
+        installDeferred = false
+        let app = Bundle.main.bundlePath
+        guard !app.contains("/AppTranslocation/"),
+              FileManager.default.isWritableFile(atPath: (app as NSString).deletingLastPathComponent) else {
+            updateStatus = "새 버전 \(release.version): 앱을 응용 프로그램 폴더로 옮긴 뒤에 설치할 수 있습니다"
+            return
+        }
+        installing = true
+        defer { installing = false }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("VideoGrab-update-\(UUID().uuidString)")
+        var handedOver = false      // 바꿔치기 스크립트에 넘겼으면 임시 폴더는 스크립트가 지운다
+        defer { if !handedOver { try? FileManager.default.removeItem(at: temp) } }
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.finishTasksAndInvalidate() }
+        do {
+            try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+            updateStatus = "\(release.version) 내려받는 중"
+            var request = URLRequest(url: release.zip)
+            request.timeoutInterval = 60
+            let (file, response) = try await session.download(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw UpdateError(message: "내려받지 못했습니다") }
+            let zip = temp.appendingPathComponent("update.zip")
+            try FileManager.default.moveItem(at: file, to: zip)
+            let hash = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
+            guard hash == release.sha256 else { throw UpdateError(message: "내려받은 파일이 릴리스의 확인값과 다릅니다") }
+            let unpacked = temp.appendingPathComponent("unpacked")
+            try Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
+            let fresh = unpacked.appendingPathComponent("VideoGrab-\(release.version)/VideoGrab.app")
+            guard let bundle = Bundle(url: fresh), bundle.bundleIdentifier == Bundle.main.bundleIdentifier,
+                  bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == release.version else {
+                throw UpdateError(message: "받은 파일이 VideoGrab \(release.version) 이 아닙니다")
+            }
+            try Self.run("/usr/bin/codesign", ["--verify", "--deep", fresh.path])
+            // 이 앱이 끝나기를 기다렸다가(최대 30초) 앱을 바꾸고 다시 켠 뒤 임시 폴더를 지우는 스크립트.
+            // 바꾸다 실패하면 원래 앱을 되돌린다. 다시 켤 때는 처음 켤 때 받은 실행 인자를 그대로 넘기고,
+            // 창 없이 상단바에만 있었으면 창 없이 켠다.
+            let script = """
+                pid="$1"; app="$2"; fresh="$3"; temp="$4"; shift 4
+                i=0; while kill -0 "$pid" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    rm -rf "$app.old"
+                    if mv "$app" "$app.old"; then
+                        if mv "$fresh" "$app"; then rm -rf "$app.old"; else mv "$app.old" "$app"; fi
+                    fi
+                fi
+                rm -rf "$temp"
+                if [ $# -gt 0 ]; then open "$app" --args "$@"; else open "$app"; fi
+                """
+            var relaunch = Array(CommandLine.arguments.dropFirst())
+            if let i = relaunch.firstIndex(of: "-startHidden") { relaunch.removeSubrange(i...min(i + 1, relaunch.count - 1)) }
+            if !AppDelegate.hasWindow && UserDefaults.standard.bool(forKey: "keepInMenuBar") { relaunch += ["-startHidden", "YES"] }
+            let sh = Process()
+            sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+            sh.arguments = ["-c", script, "sh", "\(ProcessInfo.processInfo.processIdentifier)", app, fresh.path, temp.path] + relaunch
+            sh.standardInput = FileHandle.nullDevice
+            sh.standardOutput = FileHandle.nullDevice
+            sh.standardError = FileHandle.nullDevice
+            try sh.run()
+            handedOver = true
+            updateStatus = "\(release.version) 을 설치하고 다시 켭니다"
+            NSApp.terminate(nil)
+        } catch {
+            updateStatus = "설치하지 못했습니다. " + ((error as? UpdateError)?.message ?? error.localizedDescription)
+        }
+    }
+
+    /// 짧게 끝나는 도구를 돌리고 끝날 때까지 기다린다. 실패하면 던진다.
+    static func run(_ path: String, _ args: [String]) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        if p.terminationStatus != 0 { throw UpdateError(message: "\((path as NSString).lastPathComponent) 가 실패했습니다") }
+    }
+
+    /// 설치된 yt-dlp 의 버전을 읽는다 (설정 창을 열 때).
+    func refreshToolVersion() async {
+        guard let (p, pipe) = Self.ytdlp(["--version"]) else { ytdlpVersion = nil; return }
+        ytdlpVersion = await collect(p, pipe, limit: 20).first { $0.first?.isNumber == true }
+    }
+
+    /// Homebrew 로 yt-dlp 를 최신으로 올린다. 유튜브가 바뀌어 갑자기 안 받아질 때 쓴다.
+    func upgradeYtdlp() async {
+        guard !toolBusy else { return }
+        guard let brew = Self.findTool("brew") else {
+            toolStatus = "Homebrew 를 찾지 못했습니다. 터미널에서 brew upgrade yt-dlp"
+            return
+        }
+        toolBusy = true
+        defer { toolBusy = false }
+        toolStatus = "yt-dlp 업데이트 중 (1~2분 걸릴 수 있습니다)"
+        let before = ytdlpVersion
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: brew)
+        p.arguments = ["upgrade", "yt-dlp"]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+        env["HOMEBREW_NO_ENV_HINTS"] = "1"
+        p.environment = env
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = pipe
+        p.standardInput = FileHandle.nullDevice
+        let lines = await collect(p, pipe, limit: 600)
+        await refreshToolVersion()
+        if p.terminationStatus != 0 {
+            toolStatus = "yt-dlp 업데이트 실패: " + (lines.last { $0.hasPrefix("Error") } ?? lines.last ?? "알 수 없는 오류")
+        } else if ytdlpVersion == before {
+            toolStatus = "yt-dlp 는 이미 최신입니다"
+        } else {
+            toolStatus = "yt-dlp 를 \(ytdlpVersion ?? "새 버전")(으)로 올렸습니다"
+        }
+    }
+
     static func selfTest() {
         precondition(channelURL("https://www.youtube.com/@sudapeople/videos") == "https://www.youtube.com/@sudapeople")
         precondition(channelURL("https://youtube.com/channel/UCabc?si=x") == "https://www.youtube.com/channel/UCabc")
@@ -704,6 +954,7 @@ final class DownloadStore {
         precondition(nameTemplate("https://www.instagram.com/reel/abc/").contains("[%(id)s]"))
         precondition(nameTemplate("https://x.com/a/status/1").contains("[%(id)s]"))
         precondition(!nameTemplate("https://www.youtube.com/watch?v=l5UC2--WFq8").contains("%(id)s"))
+        precondition(isNewer("1.10", than: "1.9") && isNewer("2.0", than: "1.99") && !isNewer("1.3", than: "1.3"))
         var channel = Channel(id: "UCx", name: "x", url: "u", folder: "f", baseline: [], addedAt: .now)
         precondition(channel.autoKinds == Set(Kind.allCases))    // 기록이 없으면 모두 켜짐
         channel.paused = true
@@ -765,6 +1016,10 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
             Spacer()
+            if let release = store.newRelease {
+                Button("새 버전 \(release.version) 설치") { Task { await store.installUpdate(automatic: false) } }
+                    .help("VideoGrab \(release.version) 을 내려받아 설치하고 다시 켭니다")
+            }
             Button("Finder 에서 열기") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: outputDir))
             }
@@ -815,6 +1070,9 @@ struct MenuBarMenu: View {
             }
         }
         Divider()
+        if let release = store.newRelease {
+            Button("새 버전 \(release.version) 설치") { Task { await store.installUpdate(automatic: false) } }
+        }
         Button("설정…") { show { openSettings() } }
         Divider()
         Button("VideoGrab 종료") { NSApp.terminate(nil) }
@@ -836,6 +1094,7 @@ struct SettingsView: View {
     @AppStorage("checkMinutes") private var checkMinutes = 30
     @AppStorage("keepInMenuBar") private var keepInMenuBar = false
     @AppStorage("notifyNew") private var notifyNew = false
+    @AppStorage("updateMode") private var updateMode = 1
     @State private var loginItem = SMAppService.mainApp.status == .enabled
     @State private var note: String?    // 백그라운드 절에 보일 안내·오류
     @Environment(\.openWindow) private var openWindow
@@ -908,20 +1167,51 @@ struct SettingsView: View {
             .onChange(of: keepInMenuBar) { AppDelegate.updateDockIcon() }
             .onChange(of: notifyNew) { _, on in if on { requestNotifications() } }
             Section {
+                Picker("앱 업데이트", selection: $updateMode) {
+                    Text("새 버전이 있으면 알림").tag(1)
+                    Text("자동으로 설치").tag(2)
+                    Divider()
+                    Text("확인 안 함").tag(0)
+                }
+                LabeledContent("지금 버전") {
+                    Text(store.updateStatus.isEmpty ? DownloadStore.currentVersion
+                         : "\(DownloadStore.currentVersion) · \(store.updateStatus)")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("지금 확인") { Task { await store.checkForUpdate() } }
+                    if let release = store.newRelease {
+                        Button("\(release.version) 설치") { Task { await store.installUpdate(automatic: false) } }
+                    }
+                }
+            } header: {
+                Text("업데이트")
+            } footer: {
+                Text("앱을 켤 때와 켜 둔 동안 하루에 한 번 GitHub 릴리스를 확인합니다. 설치할 때는 받은 파일의 확인값(SHA-256)을 릴리스와 대조합니다. 자동으로 설치는 받는 중이 아니고 창이 모두 닫혀 있을 때 설치하고 다시 켭니다.")
+            }
+            .onChange(of: updateMode) { store.scheduleUpdateCheck() }
+            Section {
                 ForEach(["yt-dlp", "ffmpeg", "deno"], id: \.self) { tool in
                     LabeledContent(tool) {
                         if let path = DownloadStore.findTool(tool) {
-                            Text(path).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(tool == "yt-dlp" && store.ytdlpVersion != nil ? "\(store.ytdlpVersion ?? "") · \(path)" : path)
+                                .foregroundStyle(.secondary).textSelection(.enabled)
                         } else {
                             Text("없음").foregroundStyle(.red)
                         }
                     }
                 }
+                HStack {
+                    Button("yt-dlp 업데이트") { Task { await store.upgradeYtdlp() } }
+                        .disabled(store.toolBusy)
+                    Text(store.toolStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
             } header: {
                 Text("받기 도구")
             } footer: {
-                Text("없는 도구는 터미널에서 brew install yt-dlp ffmpeg deno 로 설치합니다.")
+                Text("유튜브가 바뀌어 갑자기 안 받아지면 yt-dlp 를 업데이트합니다(Homebrew 의 brew upgrade yt-dlp 를 실행). 없는 도구는 터미널에서 brew install yt-dlp ffmpeg deno 로 설치합니다.")
             }
+            .task { await store.refreshToolVersion() }
         }
         .formStyle(.grouped)
         .frame(width: 500)
