@@ -113,6 +113,9 @@ brew install yt-dlp ffmpeg deno
 - 설치 과정 : zip 을 받아 SHA-256 을 릴리스의 값과 대조하고, 서명을 확인한 뒤 앱을 바꾸고 다시 켠다.
   바꾸다 실패하면 원래 앱으로 되돌린다
 - 공증을 받지 않은 앱이라 "누가 만든 파일인지" 는 확인하지 못한다. 그래서 기본값은 자동 설치가 아니라 알림이다
+- 켜 둔 동안 디스크의 앱이 바뀌면 (`./scripts/build.sh install`, Finder 로 덮어쓰기 등) 새 앱으로 다시 켠다.
+  자동 설치와 같은 기준으로 받는 중이거나 창이 열려 있으면 미룬다. "상단바에서 계속 실행" 이 꺼져 있으면
+  창을 닫을 때 앱이 끝나므로 다시 켜지 않는다 (다음에 켤 때 새 앱이 열린다)
 - yt-dlp 업데이트 : 유튜브가 바뀌어 갑자기 안 받아지면 설정의 "yt-dlp 업데이트" 를 누른다.
   Homebrew 의 `brew upgrade yt-dlp` 를 실행한다
 
@@ -319,6 +322,9 @@ The app checks the latest GitHub release at launch and once a day while it is ru
 - Install steps : downloads the zip, compares its SHA-256 with the value from the release, verifies the signature,
   swaps the app and relaunches. If the swap fails, the previous app is put back
 - The app is not notarized, so the publisher of a file cannot be verified. That is why the default is to notify, not to install
+- If the app on disk is replaced while it is running (`./scripts/build.sh install`, overwriting it in Finder, and so on), it relaunches as the new app.
+  Like automatic installs, it waits while something is downloading or a window is open. With "Keep running in the menu bar" off,
+  closing the window quits the app, so it does not relaunch (the new app opens next time)
 - Update yt-dlp : if YouTube changes and downloads suddenly fail, press "yt-dlp 업데이트" in Settings.
   It runs Homebrew's `brew upgrade yt-dlp`
 
