@@ -222,6 +222,7 @@ final class DownloadItem: Identifiable {
     var filePath: String?
     var lastError: String?
     var process: Process?
+    var withBrowser = false     // 크롬 쿠키·브라우저 위장으로 다시 받는 중
 
     init(url: String, folder: String? = nil, archive: String? = nil, batchName: String? = nil) {
         self.url = url
@@ -341,7 +342,14 @@ final class DownloadStore {
         return needsID ? "%(title).180B [%(id)s].%(ext)s" : "%(title).200B.%(ext)s"
     }
 
-    func run(_ item: DownloadItem) {
+    /// 그냥 받기에 실패한 링크를 크롬처럼 다시 받을지. 로그인해야 보이는 영상, 봇 차단 사이트용.
+    /// 채널 영상(유튜브)은 쿠키 없이 받히고, 취소한 것은 다시 받지 않는다.
+    static func shouldRetryWithBrowser(code: Int32, status: DownloadItem.Status, isChannel: Bool, already: Bool) -> Bool {
+        code != 0 && status != .cancelled && !isChannel && !already
+    }
+
+    func run(_ item: DownloadItem, withBrowser: Bool = false) {
+        item.withBrowser = withBrowser
         item.status = .running
         item.progress = 0
         item.count = 0
@@ -364,6 +372,11 @@ final class DownloadStore {
             args += ["--download-archive", archive,
                      "--match-filters", "live_status!=?is_live & live_status!=?is_upcoming"]
         }
+        if withBrowser {
+            // 크롬에 로그인된 쿠키를 쓰고, 크롬인 척 접속한다. 처음 한 번 macOS 가
+            // 키체인의 "Chrome Safe Storage" 접근을 묻는다 ("항상 허용" 을 누르면 다음부터 안 묻는다).
+            args += ["--cookies-from-browser", "chrome", "--impersonate", "chrome"]
+        }
         guard let (p, pipe) = Self.ytdlp(args + [item.url]) else {
             item.status = .failed("yt-dlp 가 없습니다. 터미널에서 brew install yt-dlp ffmpeg deno")
             return
@@ -384,6 +397,12 @@ final class DownloadStore {
             } catch {}
             // ponytail: 50ms 폴링. 출력이 끝난 뒤라 대개 첫 확인에서 끝난다.
             while p.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
+            item.process = nil
+            if Self.shouldRetryWithBrowser(code: p.terminationStatus, status: item.status,
+                                           isChannel: item.archive != nil, already: withBrowser) {
+                run(item, withBrowser: true)
+                return
+            }
             item.finish(p.terminationStatus)
             announce(item)
             startNextAuto()
@@ -954,6 +973,11 @@ final class DownloadStore {
         precondition(nameTemplate("https://www.instagram.com/reel/abc/").contains("[%(id)s]"))
         precondition(nameTemplate("https://x.com/a/status/1").contains("[%(id)s]"))
         precondition(!nameTemplate("https://www.youtube.com/watch?v=l5UC2--WFq8").contains("%(id)s"))
+        precondition(shouldRetryWithBrowser(code: 1, status: .running, isChannel: false, already: false))
+        precondition(!shouldRetryWithBrowser(code: 0, status: .running, isChannel: false, already: false))
+        precondition(!shouldRetryWithBrowser(code: 1, status: .cancelled, isChannel: false, already: false))
+        precondition(!shouldRetryWithBrowser(code: 1, status: .running, isChannel: true, already: false))
+        precondition(!shouldRetryWithBrowser(code: 1, status: .running, isChannel: false, already: true))
         precondition(isNewer("1.10", than: "1.9") && isNewer("2.0", than: "1.99") && !isNewer("1.3", than: "1.3"))
         var channel = Channel(id: "UCx", name: "x", url: "u", folder: "f", baseline: [], addedAt: .now)
         precondition(channel.autoKinds == Set(Kind.allCases))    // 기록이 없으면 모두 켜짐
@@ -1433,6 +1457,7 @@ struct ItemRow: View {
 
     private var runningText: String {
         let percent = item.title == nil ? "정보 가져오는 중" : item.progress >= 1 ? "마무리 중" : "\(Int(item.progress * 100))%"
+        if item.withBrowser { return "크롬으로 다시 시도 · " + percent }
         guard item.batchName != nil, let title = item.title else { return percent }
         return "\(item.count)개 받음 · \(percent) · \(title)"
     }

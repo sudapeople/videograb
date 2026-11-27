@@ -69,7 +69,9 @@ brew install yt-dlp ffmpeg deno
 - 취소하면 받던 조각(`.part`)은 남는다. "다시 받기" 를 누르면 이어서 받는다
 - 링크가 없으면 경고음만 난다
 - 그 밖에 yt-dlp 가 지원하는 사이트(치지직, 트위치 등)도 그대로 된다
-- 인스타그램·X 에서 로그인해야 보이는 영상(비공개 계정, 성인 표시 글)은 받지 못한다
+- 그냥 받기에 실패하면 크롬에 로그인된 쿠키를 쓰고 크롬인 척 접속해 한 번 더 받는다. 로그인해야 보이는 영상, 봇 차단 사이트도 이렇게 받힌다
+  (처음 한 번 macOS 가 키체인의 "Chrome Safe Storage" 접근을 묻는다. "항상 허용" 을 누르면 다음부터 묻지 않는다)
+- 재생 버튼을 누르거나 광고가 끝나야 영상 주소가 생기는 페이지는 받지 못한다 (페이지를 읽기만 하고 실행하지는 않는다)
 - 인스타그램은 영상·릴스 주소 하나씩만 받는다. 계정을 등록해 새 글을 자동으로 받는 기능은 없다
   (yt-dlp 의 인스타그램 계정 목록 기능이 동작하지 않는다)
 
@@ -273,7 +275,9 @@ Other behavior
 - Cancelling keeps the partial file (`.part`). Press retry to resume
 - If the clipboard has no link, the app just beeps
 - Any other site supported by yt-dlp works too (Twitch and more)
-- Instagram and X videos that need a login (private accounts, age-restricted posts) cannot be downloaded
+- If a download fails, it retries once with your Chrome login cookies while posing as Chrome. This covers videos that need a login and sites with bot protection
+  (the first time, macOS asks to allow access to "Chrome Safe Storage" in the keychain; choose "Always Allow")
+- Pages where the video URL only appears after pressing play or after an ad ends are not supported (the page is read, not run)
 - Instagram works one video or reel URL at a time. Registering an account for automatic downloads is not supported
   (yt-dlp's Instagram user listing does not work)
 
