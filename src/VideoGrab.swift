@@ -505,6 +505,8 @@ final class DownloadStore {
     func shutdown() {
         watchTask?.cancel()
         updateTask?.cancel()
+        appFileCheck?.cancel()
+        appFolderWatch?.cancel()
         let running = items.compactMap(\.process) + listing
         running.forEach { $0.interrupt() }
         let deadline = Date.now.addingTimeInterval(3)
@@ -672,6 +674,7 @@ final class DownloadStore {
     init() {
         scheduleWatch()
         scheduleUpdateCheck()
+        watchAppFile()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.shutdown() }
@@ -756,6 +759,87 @@ final class DownloadStore {
     private var updateTask: Task<Void, Never>?  // 하루 한 번 업데이트 확인 예약. 확인을 꺼 두면 nil
     private var installing = false
     private var installDeferred = false         // 받는 중이거나 창이 열려 있어 설치를 미뤄 둔 상태
+    private var relaunchDeferred = false        // 디스크의 앱이 바뀌었는데 받는 중이거나 창이 열려 있어 미룬 상태
+    private var appFolderWatch: DispatchSourceFileSystemObject?
+    private var appFileCheck: Task<Void, Never>?
+
+    /// 실행 파일의 정체(파일 번호와 고친 시각). 앱을 지우고 새로 복사하면 바뀐다.
+    static func executableStamp() -> String? {
+        guard let path = Bundle.main.executablePath,
+              let a = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+        return "\(a[.systemFileNumber] ?? "") \((a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
+    }
+    static let launchStamp = executableStamp()
+
+    /// 앱이 들어 있는 폴더(보통 /Applications)를 지켜본다. 누가 앱을 새로 복사해 넣으면
+    /// (빌드 스크립트의 install, Finder 로 덮어쓰기) 한가할 때 새 앱으로 다시 켠다.
+    /// 폴더에 항목이 생기거나 지워질 때만 깨어나고, 평소에는 아무것도 돌지 않는다.
+    private func watchAppFile() {
+        _ = Self.launchStamp    // static let 은 처음 읽을 때 정해진다. 바뀌기 전 값을 지금 적어 둔다
+        let folder = (Bundle.main.bundlePath as NSString).deletingLastPathComponent
+        let fd = open(folder, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.appFolderChanged() }
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        appFolderWatch = source
+    }
+
+    /// 폴더가 바뀌면 2초 동안 조용해질 때까지 기다렸다가 실행 파일을 본다. 복사가 덜 끝났으면
+    /// 서명 확인이 실패하므로 2초 뒤에 다시 본다 (최대 30번, 약 1분).
+    private func appFolderChanged() {
+        appFileCheck?.cancel()
+        appFileCheck = Task {
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { return }
+                let stamp = Self.executableStamp()
+                guard let stamp, stamp != Self.launchStamp else { return }   // 그대로거나 지워졌으면 할 일 없음
+                if (try? Self.run("/usr/bin/codesign", ["--verify", "--deep", Bundle.main.bundlePath])) != nil {
+                    relaunchDeferred = true
+                    relaunchIfIdle()
+                    return
+                }
+            }
+        }
+    }
+
+    /// 디스크의 새 앱으로 다시 켠다. 자동 설치와 같은 기준으로, 받는 중이거나 창이 열려 있으면 미룬다.
+    private func relaunchIfIdle() {
+        guard relaunchDeferred, !installing else { return }
+        // "상단바에서 계속 실행" 이 꺼져 있으면 창을 다 닫을 때 앱이 끝난다. 그때 다시 켜면 안 된다
+        // (다음에 켤 때 어차피 새 앱이 열린다).
+        if !AppDelegate.hasWindow && !UserDefaults.standard.bool(forKey: "keepInMenuBar") { return }
+        if items.contains(where: \.isActive) || (AppDelegate.hasWindow && Date.now.timeIntervalSince(Self.launchedAt) > 60) {
+            updateStatus = "새로 설치된 앱: 받는 중인 항목이 끝나고 창을 모두 닫으면 다시 켭니다"
+            return
+        }
+        let script = """
+            pid="$1"; app="$2"; shift 2
+            i=0; while kill -0 "$pid" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done
+            if [ $# -gt 0 ]; then open "$app" --args "$@"; else open "$app"; fi
+            """
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", script, "sh", "\(ProcessInfo.processInfo.processIdentifier)", Bundle.main.bundlePath] + Self.relaunchArguments
+        sh.standardInput = FileHandle.nullDevice
+        sh.standardOutput = FileHandle.nullDevice
+        sh.standardError = FileHandle.nullDevice
+        guard (try? sh.run()) != nil else { return }
+        NSApp.terminate(nil)
+    }
+
+    /// 다시 켤 때 넘길 실행 인자. 처음 켤 때 받은 인자를 그대로 쓰고,
+    /// 창 없이 상단바에만 있었으면 창 없이 켠다.
+    static var relaunchArguments: [String] {
+        var args = Array(CommandLine.arguments.dropFirst())
+        if let i = args.firstIndex(of: "-startHidden") { args.removeSubrange(i...min(i + 1, args.count - 1)) }
+        if !AppDelegate.hasWindow && UserDefaults.standard.bool(forKey: "keepInMenuBar") { args += ["-startHidden", "YES"] }
+        return args
+    }
 
     /// 0 확인 안 함, 1 새 버전이 있으면 알림(기본값), 2 자동으로 설치
     static var updateMode: Int {
@@ -825,6 +909,7 @@ final class DownloadStore {
 
     /// 미뤄 둔 설치가 있고 이제 설치할 수 있으면 설치한다. 받기가 끝날 때와 창이 닫힐 때 부른다.
     func installIfDeferred() {
+        relaunchIfIdle()
         guard installDeferred, !installing else { return }
         Task { await installUpdate(automatic: true) }
     }
@@ -892,9 +977,7 @@ final class DownloadStore {
                 rm -rf "$temp"
                 if [ $# -gt 0 ]; then open "$app" --args "$@"; else open "$app"; fi
                 """
-            var relaunch = Array(CommandLine.arguments.dropFirst())
-            if let i = relaunch.firstIndex(of: "-startHidden") { relaunch.removeSubrange(i...min(i + 1, relaunch.count - 1)) }
-            if !AppDelegate.hasWindow && UserDefaults.standard.bool(forKey: "keepInMenuBar") { relaunch += ["-startHidden", "YES"] }
+            let relaunch = Self.relaunchArguments
             let sh = Process()
             sh.executableURL = URL(fileURLWithPath: "/bin/sh")
             sh.arguments = ["-c", script, "sh", "\(ProcessInfo.processInfo.processIdentifier)", app, fresh.path, temp.path] + relaunch
